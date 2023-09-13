@@ -16,7 +16,7 @@ target_assigner = dict(
     tasks=tasks,
 )
 
-BATCH_SIZE=8
+BATCH_SIZE=1
 
 DATASET = dict(
   DIR=dict(
@@ -138,16 +138,17 @@ train_cfg = dict(assigner=assigner)
 
 
 test_cfg_range = DATASET['ROI'][DATASET['LABEL']['ROI_TYPE']]
+test_cfg_range_label = DATASET['LABEL_ROI'][DATASET['LABEL']['ROI_TYPE']]
 # todo: modify test_cfg
 test_cfg = dict(
-    post_center_limit_range=[test_cfg_range['x'][0], test_cfg_range['y'][0], test_cfg_range['z'][0], test_cfg_range['x'][1], test_cfg_range['y'][1], test_cfg_range['z'][1]], # [x_min, -y, -z, x_max, y, z] RoI
-    max_per_img=30,
+    post_center_limit_range=test_cfg_range_label, # [x_min, -y, -z, x_max, y, z] RoI
+    # max_per_img=25,
     nms=dict(
         use_rotate_nms=True,
         use_multi_class_nms=False,
-        nms_pre_max_size=50, # select first nms_pre_max_size numnber of bbox to do nms
-        nms_post_max_size=10, # select nms_post_max_size bbox after nms
-        nms_iou_threshold=0.1,
+        nms_pre_max_size=100, # select first nms_pre_max_size numnber of bbox to do nms
+        nms_post_max_size=25, # select nms_post_max_size bbox after nms
+        nms_iou_threshold=0.0,
     ),
     score_threshold=0.1,
     pc_range=[test_cfg_range['x'][0], test_cfg_range['y'][0]],

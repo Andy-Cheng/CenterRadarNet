@@ -618,45 +618,6 @@ class HighResolution3DNet(nn.Module):
 
         return nn.ModuleList(transition_layers)
 
-    # not in use
-    def _make_layer(
-        self, block, inplanes, planes, blocks, stride=1, bn_type=None, bn_momentum=0.1
-    ):
-        downsample = None
-        if stride != 1 or inplanes != planes * block.expansion:
-            downsample = nn.Sequential(
-                nn.Conv3d(
-                    inplanes,
-                    planes * block.expansion,
-                    kernel_size=1,
-                    stride=stride,
-                    bias=False,
-                ),
-                nn.BatchNorm3d(
-                    planes * block.expansion, momentum=bn_momentum
-                ),
-            )
-
-        layers = []
-        layers.append(
-            block(
-                inplanes,
-                planes,
-                stride,
-                downsample,
-                bn_type=bn_type,
-                bn_momentum=bn_momentum,
-            )
-        )
-
-        inplanes = planes * block.expansion
-        for i in range(1, blocks):
-            layers.append(
-                block(inplanes, planes, bn_type=bn_type, bn_momentum=bn_momentum)
-            )
-
-        return nn.Sequential(*layers)
-
     def _make_stage(
         self,
         layer_config,
@@ -881,24 +842,24 @@ class HighResolutionModuleNoExc(nn.Module):
 class NoExchange(nn.Module):
     def __init__(self, cfg, bn_type, bn_momentum, **kwargs):
         super(NoExchange, self).__init__()
-        self.full_res_stem = False
-        self.layer1 = ResNetBlock(1, cfg["INPLANES"], order='gcr')
-        self.full_res_stem = True
+        if kwargs['full_res_stem']:
+            self.full_res_stem = kwargs['full_res_stem']
+        self.layer1_cfg = cfg["LAYER1"]
         self.stage2_cfg = cfg["STAGE2"]
+        block = blocks_dict[self.layer1_cfg["BLOCK"]]
+        self.layer1 = block(self.layer1_cfg['INPLANES'], self.stage2_cfg['INPLANES'], order='gcr')
         num_channels = self.stage2_cfg["NUM_CHANNELS"]
         block = blocks_dict[self.stage2_cfg["BLOCK"]]
         num_channels = [
             num_channels[i] * block.expansion for i in range(len(num_channels))
         ]
-
         self.transition1 = self._make_transition_layer(
-            [cfg["INPLANES"]], num_channels, bn_type=bn_type, bn_momentum=bn_momentum
+            [self.stage2_cfg["INPLANES"]], num_channels, bn_type=bn_type, bn_momentum=bn_momentum
         )
 
         self.stage2, pre_stage_channels = self._make_stage(
             self.stage2_cfg, num_channels, bn_type=bn_type, bn_momentum=bn_momentum
         )
-
         self.stage3_cfg = cfg["STAGE3"]
         num_channels = self.stage3_cfg["NUM_CHANNELS"]
         block = blocks_dict[self.stage3_cfg["BLOCK"]]
@@ -911,6 +872,26 @@ class NoExchange(nn.Module):
         self.stage3, pre_stage_channels = self._make_stage(
             self.stage3_cfg, num_channels, bn_type=bn_type, bn_momentum=bn_momentum
         )
+
+
+        self.stage4_cfg = cfg["STAGE4"] if "STAGE4" in cfg else None
+        if not self.stage4_cfg is None:
+            num_channels = self.stage4_cfg["NUM_CHANNELS"]
+            block = blocks_dict[self.stage4_cfg["BLOCK"]]
+            num_channels = [
+                num_channels[i] * block.expansion for i in range(len(num_channels))
+            ]
+            self.transition3 = self._make_transition_layer(
+                pre_stage_channels, num_channels, bn_type=bn_type, bn_momentum=bn_momentum
+            )
+
+            self.stage4, pre_stage_channels = self._make_stage(
+                self.stage4_cfg,
+                num_channels,
+                multi_scale_output=True,
+                bn_type=bn_type,
+                bn_momentum=bn_momentum,
+            )
 
     def _make_transition_layer(
         self, num_channels_pre_layer, num_channels_cur_layer, bn_type, bn_momentum
@@ -1008,6 +989,7 @@ class NoExchange(nn.Module):
             else:
                 x_list.append(x)
         y_list = self.stage2(x_list)
+
         x_list = []
         for i in range(self.stage3_cfg["NUM_BRANCHES"]):
             if self.transition2[i] is not None:
@@ -1015,7 +997,15 @@ class NoExchange(nn.Module):
             else:
                 x_list.append(y_list[i])
         y_list = self.stage3(x_list)
-
+        
+        if not self.stage4_cfg is None:
+            x_list = []
+            for i in range(self.stage4_cfg["NUM_BRANCHES"]):
+                if self.transition3[i] is not None:
+                    x_list.append(self.transition3[i](y_list[-1]))
+                else:
+                    x_list.append(y_list[i])
+            y_list = self.stage4(x_list)
         return y_list
 
 
@@ -1253,15 +1243,19 @@ class HighResolutionModule2D(nn.Module):
 class HRNet(nn.Module):
     def __init__(self, cfg, bn_type, bn_momentum, **kwargs):
         super(HRNet, self).__init__()
-        self.layer1 = ResNetBlock(1, cfg["INPLANES"], order='gcr', is3d=False)
+        if kwargs['full_res_stem']:
+            self.full_res_stem = kwargs['full_res_stem']
+        self.layer1_cfg = cfg["LAYER1"]
         self.stage2_cfg = cfg["STAGE2"]
+        block = blocks_dict[self.layer1_cfg["BLOCK"]]
+        self.layer1 = block(self.layer1_cfg['INPLANES'], self.stage2_cfg['INPLANES'], order='gcr', is3d=False)
         num_channels = self.stage2_cfg["NUM_CHANNELS"]
         block = blocks_dict[self.stage2_cfg["BLOCK"]]
         num_channels = [
             num_channels[i] * block.expansion for i in range(len(num_channels))
         ]
         self.transition1 = self._make_transition_layer(
-            [cfg["INPLANES"]], num_channels, bn_type=bn_type, bn_momentum=bn_momentum
+            [self.stage2_cfg["INPLANES"]], num_channels, bn_type=bn_type, bn_momentum=bn_momentum
         )
 
         self.stage2, pre_stage_channels = self._make_stage(
@@ -1279,6 +1273,26 @@ class HRNet(nn.Module):
         self.stage3, pre_stage_channels = self._make_stage(
             self.stage3_cfg, num_channels, bn_type=bn_type, bn_momentum=bn_momentum
         )
+
+
+        self.stage4_cfg = cfg["STAGE4"] if "STAGE4" in cfg else None
+        if not self.stage4_cfg is None:
+            num_channels = self.stage4_cfg["NUM_CHANNELS"]
+            block = blocks_dict[self.stage4_cfg["BLOCK"]]
+            num_channels = [
+                num_channels[i] * block.expansion for i in range(len(num_channels))
+            ]
+            self.transition3 = self._make_transition_layer(
+                pre_stage_channels, num_channels, bn_type=bn_type, bn_momentum=bn_momentum
+            )
+
+            self.stage4, pre_stage_channels = self._make_stage(
+                self.stage4_cfg,
+                num_channels,
+                multi_scale_output=True,
+                bn_type=bn_type,
+                bn_momentum=bn_momentum,
+            )
 
     def _make_transition_layer(
         self, num_channels_pre_layer, num_channels_cur_layer, bn_type, bn_momentum
@@ -1385,14 +1399,14 @@ class HRNet(nn.Module):
             else:
                 x_list.append(y_list[i])
         y_list = self.stage3(x_list)
-
-        # x_list = []
-        # for i in range(self.stage4_cfg["NUM_BRANCHES"]):
-        #     if self.transition3[i] is not None:
-        #         x_list.append(self.transition3[i](y_list[-1]))
-        #     else:
-        #         x_list.append(y_list[i])
-        # y_list = self.stage4(x_list)
+        if not self.stage4_cfg is None:
+            x_list = []
+            for i in range(self.stage4_cfg["NUM_BRANCHES"]):
+                if self.transition3[i] is not None:
+                    x_list.append(self.transition3[i](y_list[-1]))
+                else:
+                    x_list.append(y_list[i])
+            y_list = self.stage4(x_list)
 
         return y_list
 
@@ -1405,12 +1419,12 @@ class HRNetBackbone(object):
         from .hrnet3D_config import MODEL_CONFIGS
         if self.backbone_cfg == 'noexchange':
             arch_net = NoExchange(
-                MODEL_CONFIGS['hr_tiny_feat16_small'], bn_type="torchsyncbn", bn_momentum=0.1
+                MODEL_CONFIGS['hr_tiny_feat16_zyx_l4'], bn_type="torchsyncbn", bn_momentum=0.1, full_res_stem=True
             )
             return arch_net
         elif self.backbone_cfg == 'hrnet':
             arch_net = HRNet(
-                MODEL_CONFIGS['hr_tiny_feat16_small'], bn_type="torchsyncbn", bn_momentum=0.1
+                MODEL_CONFIGS['hr_tiny_feat16_zyx_l4'], bn_type="torchsyncbn", bn_momentum=0.1, full_res_stem=True
             )
             return arch_net
         arch_net = HighResolution3DNet(

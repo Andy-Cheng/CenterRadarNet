@@ -13,16 +13,20 @@ from munch import DefaultMunch
 import collections
 import json
 from collections import defaultdict
+import open3d as o3d
 
 @DATASETS.register_module
 class KRadarDataset(Dataset):
-    def __init__(self, cfg, split, class_names=None, pipeline=None):
+    def __init__(self, cfg, split, class_names=None, pipeline=None, mode='train'):
         super().__init__()
         cfg = DefaultMunch.fromDict(cfg) # if cfg is dict
         self.class_names = class_names
         self.cfg = cfg
+        self.enable_jde = getattr(cfg.JDE, 'enable', False)
         self.cfg.update(class_names=class_names)
         self.split = split
+        if self.enable_jde:
+            self.enable_jde = True if mode == 'train' else False
         self.debug = True if len(cfg.DATASET.LIST_TARGET) > 0 else False
         if split == 'train':
             self.LIST_BAD = self.cfg.DATASET.LIST_BAD
@@ -32,6 +36,8 @@ class KRadarDataset(Dataset):
         self.dict_cls_id = self.cfg.DATASET.CLASS_INFO.CLASS_ID
         self.cfg.DATASET.CLASS_INFO.NUM_CLS = len(list(set(list(self.dict_cls_id.values())).difference(set([0,-1])))) # background: 0, ignore: -1
         ### Class info ###
+        with open(self.cfg.DATASET.DIR.START_END_FILE, 'r') as f:
+            self.seq_start_end = json.load(f)[split]
 
         ### Selecting Radar/Lidar/Camera (Unification of coordinate systems) ###
         self.type_coord = self.cfg.DATASET.TYPE_COORD # 1: Radar, 2: Lidar, 3: Camera
@@ -77,6 +83,7 @@ class KRadarDataset(Dataset):
         self.max_azimtuth_rad = [self.max_azimtuth_rad[0]*np.pi/180., self.max_azimtuth_rad[1]*np.pi/180.]
         self.get_calib()
         self.load_samples(cfg.DATASET.LIST_TARGET)
+
         ### Label ###
         if pipeline is None:
             self.pipeline = None
@@ -173,7 +180,12 @@ class KRadarDataset(Dataset):
         else:
             self.samples = samples
             
-
+        # for debug
+        # new_samples = []
+        # for sample in self.samples:
+        #     if sample['seq'] == '12' and int(sample['frame']) == 88:
+        #         new_samples.append(sample)
+        # self.samples = new_samples
 
     # physical valuses of each DEAR tensors' cell
     def load_physical_values(self, is_in_rad=True, is_with_doppler=False):
@@ -266,8 +278,12 @@ class KRadarDataset(Dataset):
                 return False
         return True
 
-    def get_spcube(self, path_spcube):
-        return np.load(path_spcube)
+    def get_spcube(self, seq, frame):
+        path_spcube = os.path.join(self.cfg.DATASET.DIR.RDR_PC_DIR, seq, 'radar', self.cfg.DATASET.DIR.RDR_PC_TYPE, f'{frame}.npy')
+        points = np.load(path_spcube)
+        points[:, 3] /= self.cfg.DATASET.RDR_SP_CUBE.NORMALIZING_VALUE
+        # points = np.asarray(o3d.io.read_point_cloud(path_spcube).points)
+        return points
 
     def get_tesseract(self, seq, rdr_frame_id):
         path_tesseract = os.path.join(self.cfg.DATASET.DIR.DEAR_DIR, seq, 'radar_DEAR_D_downsampled_2', f'tesseract_{rdr_frame_id}.npy')
@@ -353,7 +369,7 @@ class KRadarDataset(Dataset):
     
     def get_description(self, seq):
         try:
-            path_desc = os.path.join(self.cfg.DATASET.DIR.DATA_ROOT, seq, 'description.txt')
+            path_desc = os.path.join(self.cfg.DATASET.DIR.LIDAR_PC_DIR, seq, 'description.txt')
             with open(path_desc, 'r') as f:
                 line = f.readline()
             road_type, capture_time, climate = line.split(',')
@@ -429,37 +445,46 @@ class KRadarDataset(Dataset):
         }
 
         return dict_path
-    
-    def __getitem__(self, idx):
-        # try:
+    def get_second_sample_idx(self, idx, seq):
+        start_end = self.seq_start_end[seq]
+        target_bin = None
+        for bin in start_end:
+            if bin[0] <= idx <= bin[1]:
+                target_bin = bin
+                break
+        left_edge = max(idx-self.cfg.JDE.max_frame_length, target_bin[0])
+        right_edge = min(idx+self.cfg.JDE.max_frame_length, target_bin[1])
+        idx_2 = np.random.choice([*range(left_edge, idx), *range(idx+1, right_edge+1)])
+        return idx_2
+
+
+
+    def get_sample_by_idx(self, idx):
         sample = self.samples[idx]
         dict_item = {}
         dict_item['meta'] = {'seq': sample['seq'], 'frame': sample['frame'], 'rdr_frame': sample['rdr_frame']}
         dict_item['objs'] = sample['objs']
-        # dict_item[f'meta']['desc'] = self.get_description(dict_item['seq'])
-        # try:
-            ### Get only required data ###
+        # dict_item['meta']['desc'] = self.get_description(dict_item['seq'])
         if self.cfg.DATASET.GET_ITEM['rdr_sparse_cube']:
-            # rdr_sparse_cube = 
-            # dict_item['rdr_sparse_cube'] = self.get_spcube(rdr_sparse_cube)
-            pass
+            dict_item['rdr_sparse_cube'] = self.get_spcube(sample['seq'], sample['frame'])
         if self.cfg.DATASET.GET_ITEM['rdr_tesseract']:
             dict_item['rdr_tesseract'] = self.get_tesseract(sample['seq'], sample['rdr_frame'])
         if self.cfg.DATASET.GET_ITEM['rdr_cube']:
             rdr_cube = self.get_cube(sample['seq'], sample['rdr_frame'])
-            # rdr_cube = self.get_cube_direct(dict_path['rdr_cube'])
             dict_item['rdr_cube'] = rdr_cube
-        # if self.cfg.DATASET.GET_ITEM['rdr_cube_doppler']:
-            # dict_item['rdr_cube_doppler'] = self.get_cube_doppler(dict_path['rdr_cube_doppler'])
         if self.cfg.DATASET.GET_ITEM['ldr_pc_64']:
             dict_item['ldr_pc_64'] = self.get_pc_lidar(sample['seq'], sample['frame'])
-        ### Get only required data ###
         dict_item.update(mode=self.split)
         dict_item, _ = self.pipeline(dict_item, info=self.cfg)
         return dict_item
-        # except:
-        #     print(f'Exception error (Dataset): __getitem__ error: {sample["seq"]}/{sample["frame"]}/{sample["rdr_frame"]}')
-        #     return None
+
+    def __getitem__(self, idx):
+        dict_item = self.get_sample_by_idx(idx)
+        if self.enable_jde:
+            idx_2 = self.get_second_sample_idx(idx, dict_item['meta']['seq'])
+            return [dict_item, self.get_sample_by_idx(idx_2)]
+        else:
+            return dict_item
         
     def evaluation(self, detections, output_dir=None, testset=False):
         # TODO: implement the evaluation
@@ -471,6 +496,11 @@ class KRadarDataset(Dataset):
     
     @staticmethod
     def collate_fn(batch_list):
+        if isinstance(batch_list[0], list):
+            new_batch_list = []
+            for batch in batch_list:
+                new_batch_list += batch
+            batch_list = new_batch_list
         if None in batch_list:
             print('* Exception error (Dataset): collate_fn')
             return None
@@ -486,7 +516,7 @@ class KRadarDataset(Dataset):
         ret = {}
         for key, elems in example_merged.items():
             if key in ["anchors", "anchors_mask", "reg_targets", "reg_weights", "labels", "hm", "anno_box",
-                        "ind", "mask", "cat"]:
+                        "ind", "mask", "cat", "obj_id"]:
                 ret[key] = collections.defaultdict(list)
                 res = []
                 for elem in elems:
@@ -495,6 +525,19 @@ class KRadarDataset(Dataset):
                 for kk, vv in ret[key].items():
                     res.append(torch.stack(vv))
                 ret[key] = res  # [task], task: (batch, num_class_in_task, feat_shape_h, feat_shape_w)
+            elif key in ["voxels", "num_points", "num_gt", "voxel_labels", "num_voxels",
+                   "cyv_voxels", "cyv_num_points", "cyv_num_voxels"]:
+                ret[key] = torch.tensor(np.concatenate(elems, axis=0))
+            elif key == "points":
+                ret[key] = [torch.tensor(elem) for elem in elems]
+            elif key in ["coordinates", "cyv_coordinates"]:
+                coors = []
+                for i, coor in enumerate(elems):
+                    coor_pad = np.pad(
+                        coor, ((0, 0), (1, 0)), mode="constant", constant_values=i
+                    )
+                    coors.append(coor_pad)
+                ret[key] = torch.tensor(np.concatenate(coors, axis=0))
             elif key in ['gt_boxes_and_cls']:
                 ret[key] = torch.tensor(np.stack(elems, axis=0))
             elif key in ['rdr_tensor']:

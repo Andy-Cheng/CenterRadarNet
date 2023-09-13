@@ -401,7 +401,6 @@ class AssignLabel(object):
                             continue 
 
                         draw_gaussian(hm[cls_id], ct, radius)
-
                         new_idx = k
                         x, y = ct_int[0], ct_int[1]
 
@@ -486,11 +485,24 @@ class AssignLabelRadar(object):
         self.gaussian_overlap = assigner_cfg.gaussian_overlap
         self._max_objs = assigner_cfg.max_objs
         self._min_radius = assigner_cfg.min_radius
+        self._consider_radar_visibility = getattr(assigner_cfg, "consider_radar_visibility", False)
         self.cfg = assigner_cfg
         if "flip_y_prob" in kwargs:
             self.flip_y_prob = kwargs["flip_y_prob"]
         else:
             self.flip_y_prob = 0.0
+        if self._consider_radar_visibility:
+            self.radar_visibility_bin = assigner_cfg.radar_visibility_cfg.bin
+            self.radar_visibility_mod_coeff = assigner_cfg.radar_visibility_cfg.mod_coeff
+
+    def get_mod_coef_by_points(self, num_of_points):
+        bin_idx = 0
+        for bin in self.radar_visibility_bin:
+            if num_of_points < bin:
+                break
+            bin_idx += 1
+        return self.radar_visibility_mod_coeff[bin_idx]
+
 
     def __call__(self, res, info):
         max_objs = self._max_objs
@@ -521,12 +533,12 @@ class AssignLabelRadar(object):
                     for class_idx, class_name in enumerate(class_names_task):
                         if class_name == obj['obj_type']:
                             obj_theta = box_np_ops.limit_period(obj['euler'][2], offset=0.5, period=np.pi * 2)
-                            gt_box_by_task[task_idx].append([class_idx, *obj['xyz'], *obj['lwh'], obj_theta])
+                            gt_box_by_task[task_idx].append([class_idx, *obj['xyz'], *obj['lwh'], obj_theta, int(obj['obj_id']), int(obj['num_cfar_pts']) if 'num_cfar_pts' in obj else 0])
                             gt_classnames.append(class_name)
             
             draw_gaussian = draw_umich_gaussian
 
-            hms, anno_boxs, inds, masks, cats = [], [], [], [], []
+            hms, anno_boxs, inds, masks, cats, obj_ids = [], [], [], [], [], []
 
             for idx, task in enumerate(self.tasks):
                 gt_box_task = gt_box_by_task[idx]
@@ -537,6 +549,7 @@ class AssignLabelRadar(object):
                 ind = np.zeros((max_objs), dtype=np.int64)
                 mask = np.zeros((max_objs), dtype=np.uint8)
                 cat = np.zeros((max_objs), dtype=np.int64)
+                obj_id = -np.ones((max_objs), dtype=np.int64)
                 num_objs = min(len(gt_box_task), max_objs)  
                 for k in range(num_objs):
                     cls_id = gt_box_task[k][0]
@@ -550,6 +563,264 @@ class AssignLabelRadar(object):
                         x, y, z = gt_box_task[k][1:4]
                         coor_x, coor_y = (x - radar_range[2]) / voxel_size / self.out_size_factor, \
                                          (y - radar_range[1]) / voxel_size / self.out_size_factor
+                        ct = np.array(
+                            [coor_x, coor_y], dtype=np.float32) 
+                        ct_int = ct.astype(np.int32)
+                        # throw out not in range objects to avoid out of array area when creating the heatmap
+                        if not (0 <= ct_int[0] < feature_map_size[1] and 0 <= ct_int[1] < feature_map_size[0]):
+                            continue 
+                        mod_coef = self.get_mod_coef_by_points(gt_box_task[k][9]) if self._consider_radar_visibility else 1.
+                        draw_gaussian(hm[cls_id], ct, radius, modulation_coef=mod_coef)
+                        new_idx = k
+                        x, y = ct_int[0], ct_int[1]
+                        cat[new_idx] = cls_id
+                        obj_id[new_idx] = gt_box_task[k][8]
+                        ind[new_idx] = y * feature_map_size[1] + x
+                        mask[new_idx] = 1
+                        rot = gt_box_task[k][7]
+                        anno_box[new_idx] = np.concatenate(
+                            (ct - (x, y), z, np.log(gt_box_task[k][4:7]),
+                             np.sin(rot), np.cos(rot)), axis=None)
+
+                hms.append(hm)
+                anno_boxs.append(anno_box)
+                masks.append(mask)
+                inds.append(ind)
+                cats.append(cat)
+                obj_ids.append(obj_id)
+
+            # used for two stage code 
+            # boxes = []
+            # for gt_boxes in gt_box_by_task:
+            #     boxes.append(np.array(gt_boxes).reshape(-1, 8))
+            # boxes = np.concatenate(boxes, axis=0)[:, 1:] if len(boxes) > 0 else np.array(boxes).reshape(-1, 7)# (x, y, z, l, w, h, rot_z)
+            # classes = np.array([info['class_names'].index(class_name) for class_name in gt_classnames])
+            # gt_boxes_and_cls = np.zeros((max_objs, 8), dtype=np.float32)
+            # boxes_and_cls = np.concatenate((boxes, classes.reshape(-1, 1).astype(np.float32)), axis=1)
+            # num_obj = len(boxes_and_cls)
+            # assert num_obj <= max_objs
+            # gt_boxes_and_cls[:num_obj] = boxes_and_cls
+            # example.update({'gt_boxes_and_cls': gt_boxes_and_cls})
+            # used for two stage code 
+
+            example.update({'hm': hms, 'anno_box': anno_boxs, 'ind': inds, 'mask': masks, 'cat': cats, 'obj_id': obj_ids})
+        else:
+            pass
+        res_new = {}
+        # add a new axis (channel) to rdr_cube
+        res_new.update(
+            example,
+            meta=res['meta'],
+            rdr_tensor=rdr_tensor
+            )
+
+        return res_new, info
+    
+
+@PIPELINES.register_module
+class PreprocessKradar(object):
+    def __init__(self, cfg=None, **kwargs):
+        self.shuffle_points = cfg.shuffle_points
+        self.min_points_in_gt = cfg.get("min_points_in_gt", -1)
+        self.pc_type = cfg.pc_type
+        self.mode = cfg.mode
+        if self.mode == "train":
+            self.global_rotation_noise = cfg.global_rot_noise
+            self.global_scaling_noise = cfg.global_scale_noise
+            self.global_translate_std = cfg.get('global_translate_std', 0)
+            self.class_names = cfg.class_names
+        self.no_augmentation = cfg.get('no_augmentation', False)
+
+    def __call__(self, res, info):
+        points = res[self.pc_type]
+        res["mode"] = self.mode
+        res['metadata'] = {
+            "num_point_features": points.shape[1],
+        }
+        res['lidar'] = {
+                "type": "lidar",
+                "points": None,
+                "annotations": None,
+        }
+        gt_dict = None
+        # TODO: add data augmentation
+
+        if self.shuffle_points:
+            np.random.shuffle(points)
+        
+        res["lidar"]["points"] = points.astype(np.float32)
+
+        if self.mode == "train":
+            res["lidar"]["annotations"] = gt_dict
+
+        return res, info
+    
+
+@PIPELINES.register_module
+class VoxelizationKradar(object):
+    def __init__(self, **kwargs):
+        cfg = kwargs.get("cfg", None)
+        self.range = cfg.range
+        self.voxel_size = cfg.voxel_size
+        self.max_points_in_voxel = cfg.max_points_in_voxel
+        self.max_voxel_num = [cfg.max_voxel_num, cfg.max_voxel_num] if isinstance(cfg.max_voxel_num, int) else cfg.max_voxel_num
+        self.double_flip = cfg.get('double_flip', False)
+
+        self.voxel_generator = VoxelGenerator(
+            voxel_size=self.voxel_size,
+            point_cloud_range=self.range,
+            max_num_points=self.max_points_in_voxel,
+            max_voxels=self.max_voxel_num[0],
+        )
+
+    def __call__(self, res, info):
+        voxel_size = self.voxel_generator.voxel_size
+        pc_range = self.voxel_generator.point_cloud_range
+        grid_size = self.voxel_generator.grid_size
+
+        if res["mode"] == "train":
+            max_voxels = self.max_voxel_num[0]
+        else:
+            max_voxels = self.max_voxel_num[1]
+
+        voxels, coordinates, num_points = self.voxel_generator.generate(
+            res["lidar"]["points"], max_voxels=max_voxels 
+        )
+        num_voxels = np.array([voxels.shape[0]], dtype=np.int64)
+
+        res["lidar"]["voxels"] = dict(
+            voxels=voxels,
+            coordinates=coordinates,
+            num_points=num_points,
+            num_voxels=num_voxels,
+            shape=grid_size,
+            range=pc_range,
+            size=voxel_size
+        )
+
+        double_flip = self.double_flip and (res["mode"] != 'train')
+
+        if double_flip:
+            flip_voxels, flip_coordinates, flip_num_points = self.voxel_generator.generate(
+                res["lidar"]["yflip_points"]
+            )
+            flip_num_voxels = np.array([flip_voxels.shape[0]], dtype=np.int64)
+
+            res["lidar"]["yflip_voxels"] = dict(
+                voxels=flip_voxels,
+                coordinates=flip_coordinates,
+                num_points=flip_num_points,
+                num_voxels=flip_num_voxels,
+                shape=grid_size,
+                range=pc_range,
+                size=voxel_size
+            )
+
+            flip_voxels, flip_coordinates, flip_num_points = self.voxel_generator.generate(
+                res["lidar"]["xflip_points"]
+            )
+            flip_num_voxels = np.array([flip_voxels.shape[0]], dtype=np.int64)
+
+            res["lidar"]["xflip_voxels"] = dict(
+                voxels=flip_voxels,
+                coordinates=flip_coordinates,
+                num_points=flip_num_points,
+                num_voxels=flip_num_voxels,
+                shape=grid_size,
+                range=pc_range,
+                size=voxel_size
+            )
+
+            flip_voxels, flip_coordinates, flip_num_points = self.voxel_generator.generate(
+                res["lidar"]["double_flip_points"]
+            )
+            flip_num_voxels = np.array([flip_voxels.shape[0]], dtype=np.int64)
+
+            res["lidar"]["double_flip_voxels"] = dict(
+                voxels=flip_voxels,
+                coordinates=flip_coordinates,
+                num_points=flip_num_points,
+                num_voxels=flip_num_voxels,
+                shape=grid_size,
+                range=pc_range,
+                size=voxel_size
+            )            
+
+        return res, info
+    
+@PIPELINES.register_module
+class AssignLabelLidar(object):
+    def __init__(self, **kwargs):
+        """Return CenterNet training labels like heatmap, height, offset"""
+        assigner_cfg = kwargs["cfg"]
+        self.out_size_factor = assigner_cfg.out_size_factor
+        self.tasks = assigner_cfg.target_assigner.tasks
+        self.gaussian_overlap = assigner_cfg.gaussian_overlap
+        self._max_objs = assigner_cfg.max_objs
+        self._min_radius = assigner_cfg.min_radius
+        self.cfg = assigner_cfg
+
+    def __call__(self, res, info):
+        max_objs = self._max_objs
+        class_names_by_task = [t.class_names for t in self.tasks]
+        # num_classes_by_task = [t.num_class for t in self.tasks]
+
+        example = {}
+
+        if res["mode"] == "train":
+            # Calculate output featuremap size
+            if 'voxels' in res['lidar']:
+                # Calculate output featuremap size
+                grid_size = res["lidar"]["voxels"]["shape"] 
+                pc_range = res["lidar"]["voxels"]["range"]
+                voxel_size = res["lidar"]["voxels"]["size"]
+            else:
+                pc_range = np.array(self.cfg['pc_range'], dtype=np.float32)
+                voxel_size = np.array(self.cfg['voxel_size'], dtype=np.float32)
+                grid_size = (pc_range[3:] - pc_range[:3]) / voxel_size
+                grid_size = np.round(grid_size).astype(np.int64)
+
+            feature_map_size = grid_size[::-1][1:] // self.out_size_factor # (y, x)
+            # prepare the gt by tasks
+            gt_classnames = []
+            gt_box_by_task = [[] for _ in range(len(self.tasks))] # [[[sub_class_id, x, y, z, l, w, h, theta]], [],  ...]
+            for obj in res['objs']:
+                for task_idx, class_names_task in enumerate(class_names_by_task):
+                    for class_idx, class_name in enumerate(class_names_task):
+                        if class_name == obj['obj_type']:
+                            obj_theta = box_np_ops.limit_period(obj['euler'][2], offset=0.5, period=np.pi * 2)
+                            gt_box_by_task[task_idx].append([class_idx, *obj['xyz'], *obj['lwh'], obj_theta])
+                            gt_classnames.append(class_name)
+                            
+            draw_gaussian = draw_umich_gaussian
+            hms, anno_boxs, inds, masks, cats = [], [], [], [], []
+
+            for idx, task in enumerate(self.tasks):
+                gt_box_task = gt_box_by_task[idx]
+                hm = np.zeros((len(class_names_by_task[idx]), feature_map_size[0], feature_map_size[1]),
+                              dtype=np.float32)
+
+                # [reg, hei, dim, rotsin, rotcos]
+                anno_box = np.zeros((max_objs, 8), dtype=np.float32)
+
+                ind = np.zeros((max_objs), dtype=np.int64)
+                mask = np.zeros((max_objs), dtype=np.uint8)
+                cat = np.zeros((max_objs), dtype=np.int64)
+
+                num_objs = min(len(gt_box_task), max_objs)  
+
+                for k in range(num_objs):
+                    cls_id = gt_box_task[k][0]
+                    l, w, h = gt_box_task[k][4], gt_box_task[k][5], \
+                              gt_box_task[k][6]
+                    l, w = w / voxel_size[0] / self.out_size_factor, l / voxel_size[1] / self.out_size_factor
+                    if w > 0 and l > 0:
+                        radius = gaussian_radius((w, l), min_overlap=self.gaussian_overlap)
+                        radius = max(self._min_radius, int(radius))
+                        # be really careful for the coordinate system of your box annotation. 
+                        x, y, z = gt_box_task[k][1:4]
+                        coor_x, coor_y = (x - pc_range[0]) / voxel_size[0] / self.out_size_factor, \
+                                         (y - pc_range[1]) / voxel_size[1] / self.out_size_factor
                         ct = np.array(
                             [coor_x, coor_y], dtype=np.float32) 
                         ct_int = ct.astype(np.int32)
@@ -588,12 +859,6 @@ class AssignLabelRadar(object):
             example.update({'hm': hms, 'anno_box': anno_boxs, 'ind': inds, 'mask': masks, 'cat': cats})
         else:
             pass
-        res_new = {}
-        # add a new axis (channel) to rdr_cube
-        res_new.update(
-            example,
-            meta=res['meta'],
-            rdr_tensor=rdr_tensor
-            )
+        res["lidar"]["targets"] = example
 
-        return res_new, info
+        return res, info

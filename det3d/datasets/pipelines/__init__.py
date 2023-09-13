@@ -22,5 +22,9 @@ __all__ = [
     "Voxelization",
     "AssignTarget",
     "AssignLabel",
-    "AssignLabelRadar"
+    "AssignLabelRadar",
+    # the following are for kradar radar point cloud
+    "PreprocessKradar",
+    "VoxelizationKradar",
+    "AssignLabelLidar"
 ]

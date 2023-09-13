@@ -40,8 +40,6 @@ class Reformat(object):
         if res["mode"] == "train":
             data_bundle.update(res["lidar"]["targets"])
         elif res["mode"] == "val":
-            data_bundle.update(dict(metadata=meta, ))
-
             if self.double_flip:
                 # y axis 
                 yflip_points = res["lidar"]["yflip_points"]
@@ -84,6 +82,9 @@ class Reformat(object):
                 return [data_bundle, yflip_data_bundle, xflip_data_bundle, double_flip_data_bundle], info
 
 
+        # K-Radar specific
+        if 'meta' in res:
+            data_bundle.update(meta=res['meta'])
         return data_bundle, info
 
 

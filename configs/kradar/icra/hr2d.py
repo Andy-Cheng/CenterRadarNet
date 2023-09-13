@@ -16,10 +16,10 @@ target_assigner = dict(
     tasks=tasks,
 )
 
-BATCH_SIZE=1
+BATCH_SIZE=16
 
 JDE=dict(
-  enable=True,
+  enable=False,
   max_frame_length=5,
   repeat_frames=True,
   embedding_dim=32,
@@ -69,7 +69,7 @@ DATASET = dict(
     ROI_DEFAULT=[0,120,-100,100,-50,50], # x_min_max, y_min_max, z_min_max / Dim: [m]
     IS_CHECK_VALID_WITH_AZIMUTH=True,
     MAX_AZIMUTH_DEGREE=[-50, 50],
-    CONSIDER_RADAR_VISIBILITY=True,
+    CONSIDER_RADAR_VISIBILITY=False,
   ),
   ROI = dict(
     roi1 = {'z': [-2., 7.6], 'y': [-30., 30.], 'x': [0, 80]}
@@ -124,8 +124,7 @@ DATASET = dict(
     # DEAR_BUFFER_SIZE=6*BATCH_SIZE # dear loading buffer size per worker process
   )
 
-hr_final_conv_out = 16
-feature_height_before_head = ceil((DATASET['ROI'][DATASET['LABEL']['ROI_TYPE']]['z'][1] - DATASET['ROI'][DATASET['LABEL']['ROI_TYPE']]['z'][0])/DATASET['RDR_CUBE']['GRID_SIZE'])
+hr_final_conv_out = 64
 
 # model settings
 model = dict(
@@ -137,7 +136,7 @@ model = dict(
     ),
     backbone=dict(
         type="HRNet3D",
-        backbone_cfg='hr_tiny_feat16_zyx_l4',
+        backbone_cfg='hrnet',
         final_conv_in = 16,
         final_conv_out = hr_final_conv_out,
         final_fuse = 'top',
@@ -148,7 +147,7 @@ model = dict(
     neck=None,
     bbox_head=dict(
         type="CenterHead",
-        in_channels=hr_final_conv_out*feature_height_before_head, # 384
+        in_channels=hr_final_conv_out, # 64
         tasks=tasks,
         dataset='kradar',
         weight=0.25,
@@ -255,7 +254,7 @@ lr_config = dict(
     type="one_cycle", lr_max=0.001, moms=[0.95, 0.85], div_factor=10.0, pct_start=0.4,
 )
 
-checkpoint_config = dict(interval=5)
+checkpoint_config = dict(interval=2)
 # yapf:disable
 log_config = dict(
     interval=10,

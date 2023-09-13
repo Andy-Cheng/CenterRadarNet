@@ -36,7 +36,7 @@ def example_to_device(example, device, non_blocking=False) -> dict:
     for k in keys:
         v = example.pop(k)
         if k in ["anchors", "anchors_mask", "reg_targets", "reg_weights", "labels", "hm",
-                "anno_box", "ind", "mask", 'cat', 'points']:
+                "anno_box", "ind", "mask", 'cat', 'points', "obj_id"]:
             example_torch[k] = [res.to(device, non_blocking=non_blocking) for res in v]
         elif k in [
             "voxels",
@@ -79,6 +79,11 @@ def parse_second_losses(losses):
         if loss_name == "loc_loss_elem":
             for idx_l, loss_item in enumerate(loss_value[0]):
                 log_vars[loc_loss_elem_names[idx_l]] = loss_item.item()
+        elif loss_name in ['num_pos', 'num_neg']:
+            log_vars[loss_name] = loss_value
+        elif loss_name == 'jde_loss':
+            loss += loss_value
+            log_vars[loss_name] = loss_value.detach().cpu().item()
         else:
             log_vars[loss_name] = loss_value[0].item()
 

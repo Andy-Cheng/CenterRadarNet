@@ -12,7 +12,7 @@ from __future__ import print_function
 import numpy as np
 import torch
 from torch import nn
-from .circle_nms_jit import circle_nms
+from det3d.core.utils.circle_nms_jit import circle_nms
 
 def gaussian_radius(det_size, min_overlap=0.5):
     height, width = det_size
@@ -36,18 +36,18 @@ def gaussian_radius(det_size, min_overlap=0.5):
     r3  = (b3 + sq3) / 2
     return min(r1, r2, r3)
 
-def gaussian2D(shape, sigma=1):
+def gaussian2D(shape, sigma=1, modulation_coef=1.):
     m, n = [(ss - 1.) / 2. for ss in shape]
     y, x = np.ogrid[-m:m+1,-n:n+1]
 
-    h = np.exp(-(x * x + y * y) / (2 * sigma * sigma))
+    h = np.exp(-(x * x + y * y) / (2 * sigma * sigma)) * modulation_coef
     h[h < np.finfo(h.dtype).eps * h.max()] = 0
     return h
 
 
-def draw_umich_gaussian(heatmap, center, radius, k=1):
+def draw_umich_gaussian(heatmap, center, radius, k=1, modulation_coef=1.):
     diameter = 2 * radius + 1
-    gaussian = gaussian2D((diameter, diameter), sigma=diameter / 6)
+    gaussian = gaussian2D((diameter, diameter), sigma=diameter / 6, modulation_coef=modulation_coef)
 
     x, y = int(center[0]), int(center[1])
 
@@ -119,3 +119,22 @@ def bilinear_interpolate_torch(im, x, y):
     wd = (x - x0.type_as(x)) * (y - y0.type_as(y))
     ans = torch.t((torch.t(Ia) * wa)) + torch.t(torch.t(Ib) * wb) + torch.t(torch.t(Ic) * wc) + torch.t(torch.t(Id) * wd)
     return ans
+
+if __name__ == '__main__':
+    import matplotlib.pyplot as plt
+    w, l = 5, 10
+    radius = gaussian_radius((l, w), min_overlap=0.1)
+    radius = int(max(radius, 2))
+    shape = (20, 20)
+    hm = np.zeros(shape)
+    center = [1, 1]
+    draw_umich_gaussian(hm, center, radius)
+    plt.imsave('test_2d_gaussian.png', hm)
+
+    center = [10, 10]
+    draw_umich_gaussian(hm, center, radius)
+    plt.imsave('test_2d_gaussian.png', hm)
+
+    center = [2, 2]
+    draw_umich_gaussian(hm, center, radius)
+    plt.imsave('test_2d_gaussian.png', hm)

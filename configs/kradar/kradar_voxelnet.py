@@ -16,51 +16,19 @@ target_assigner = dict(
     tasks=tasks,
 )
 
-BATCH_SIZE=1
-
-JDE=dict(
-  enable=True,
-  max_frame_length=5,
-  repeat_frames=True,
-  embedding_dim=32,
-  weight=1.0,
-  distance_cfg=dict(
-    type='LpDistance',
-    p=2, 
-    power=1,
-  ),
-  loss_fcn_cfg=dict(
-    type='TripletMarginLoss',
-    margin=0.05,
-    swap=False,
-    smooth_loss=False,
-    triplets_per_anchor="all"
-  ),
-  miner_cfg=dict(
-    type='BatchEasyHardMiner',
-    pos_strategy='all',
-    neg_strategy='all'
-  ),
-  reducer_cfg=dict(
-    type='AvgNonZeroReducer'
-  ),
-  emb_head_cfg=dict(
-    head={'emb': (32, 2)}, # emb_feat_size, num of conv,
-    share_conv_channel=64,
-    tasks=tasks
-  )
-)
+BATCH_SIZE=16
 
 DATASET = dict(
   DIR=dict(
-    DATA_ROOT='/mnt/ssd1/kradar_dataset',
+    DATA_ROOT='/mnt/nas_kradar/kradar_dataset',
     DEAR_DIR='/mnt/ssd1/kradar_dataset/radar_tensor',
     RDR_CUBE_DIR='/mnt/ssd1/kradar_dataset/radar_tensor_zyx',
     LIDAR_PC_DIR='/mnt/nas_kradar/kradar_dataset/dir_all',
-    RDR_CALIB='/mnt/ssd1/kradar_dataset/resources/calib/calib_radar_lidar.json',
-    CAM_CALIB='/mnt/ssd1/kradar_dataset/resources/calib/calib_frontcam_lidar.json',
-    LABEL_FILE='/mnt/ssd1/kradar_dataset/labels/refined_v3numpoints.json',
-    START_END_FILE='/mnt/ssd1/kradar_dataset/labels/seq_start_end.json'
+    RDR_PC_DIR='/mnt/nas_kradar/kradar_dataset/dir_all',
+    RDR_PC_TYPE='cart_cacfar_15_5_150_150_power',
+    RDR_CALIB='/mnt/nas_kradar/kradar_dataset/resources/calib/calib_radar_lidar.json',
+    CAM_CALIB='/mnt/nas_kradar/kradar_dataset/resources/calib/calib_frontcam_lidar.json',
+    LABEL_FILE='/mnt/nas_kradar/kradar_dataset/GT/refined_v3.json'
   ),
   TYPE_COORD= 1, # 1: Radar, 2: Lidar, 3: Camera
   LABEL= dict(
@@ -68,15 +36,18 @@ DATASET = dict(
     ROI_TYPE='roi1',
     ROI_DEFAULT=[0,120,-100,100,-50,50], # x_min_max, y_min_max, z_min_max / Dim: [m]
     IS_CHECK_VALID_WITH_AZIMUTH=True,
-    MAX_AZIMUTH_DEGREE=[-50, 50],
-    CONSIDER_RADAR_VISIBILITY=True,
+    MAX_AZIMUTH_DEGREE=[-50, 50]
   ),
   ROI = dict(
-    roi1 = {'z': [-2., 7.6], 'y': [-30., 30.], 'x': [0, 80]}
+    roi1 = {'z': [-2., 7.2], 'y': [-30., 30.], 'x': [0, 80]}
   ),
   LABEL_ROI=dict(
-    roi1=[0, -15, -2, 72, 15, 7.6] # [xyz_min, xyz_max]
+    roi1=[0, -15, -2, 72, 15, 7.2] # [xyz_min, xyz_max]
   ),
+  RDR_SP_CUBE=dict(
+    NORMALIZING_VALUE=1e+13,
+  )
+  ,
   RDR_CUBE = dict(
       DOPPLER=dict(
         IS_ANOTHER_DIR=True,
@@ -112,9 +83,9 @@ DATASET = dict(
   
     # List of items to be returned by the dataloader
     GET_ITEM= {
-      'rdr_sparse_cube'   : False,
+      'rdr_sparse_cube'   : True,
       'rdr_tesseract'     : False,
-      'rdr_cube'          : True,
+      'rdr_cube'          : False,
       'rdr_cube_doppler'  : False,
       'ldr_pc_64'         : False,
       'cam_front_img'     : False,
@@ -127,33 +98,38 @@ DATASET = dict(
 hr_final_conv_out = 16
 feature_height_before_head = ceil((DATASET['ROI'][DATASET['LABEL']['ROI_TYPE']]['z'][1] - DATASET['ROI'][DATASET['LABEL']['ROI_TYPE']]['z'][0])/DATASET['RDR_CUBE']['GRID_SIZE'])
 
+radar_feat_dim = 4
+
 # model settings
 model = dict(
-    type="RadarNetSingleStage",
-    jde_cfg=JDE,
+    type="VoxelNet",
     pretrained=None,
     reader=dict(
-        type='RadarFeatureNet',
+        type="VoxelFeatureExtractorV3",
+        num_input_features=radar_feat_dim,
     ),
     backbone=dict(
-        type="HRNet3D",
-        backbone_cfg='hr_tiny_feat16_zyx_l4',
-        final_conv_in = 16,
-        final_conv_out = hr_final_conv_out,
-        final_fuse = 'top',
-        ds_factor=1,
+        type="SpMiddleResNetFHD", num_input_features=radar_feat_dim, ds_factor=1
     ),
-
-    # todo: modify neck and head config 
-    neck=None,
+    neck=dict(
+        type="RPN",
+        layer_nums=[5, 5],
+        ds_layer_strides=[1, 2],
+        ds_num_filters=[128, 128],
+        us_layer_strides=[1, 2],
+        us_num_filters=[128, 128],
+        num_input_features=128,
+        logger=logging.getLogger("RPN"),
+    ),
     bbox_head=dict(
+        # type='RPNHead',
         type="CenterHead",
-        in_channels=hr_final_conv_out*feature_height_before_head, # 384
+        in_channels=sum([128, 128]),
         tasks=tasks,
         dataset='kradar',
         weight=0.25,
-        code_weights=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], # weight of loss from common_heads
-        common_heads={'reg': (2, 2), 'height': (1, 2), 'dim':(3, 2), 'rot':(2, 2)}, # (num output feat maps, )
+        code_weights=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        common_heads={'reg': (2, 2), 'height': (1, 2), 'dim':(3, 2), 'rot':(2, 2)}, # (output_channel, num_conv),
         share_conv_channel=64,
         dcn_head=False
     ),
@@ -167,8 +143,6 @@ assigner = dict(
     gaussian_overlap=0.1,
     max_objs=30,
     min_radius=2,
-    consider_radar_visibility=DATASET['LABEL']['CONSIDER_RADAR_VISIBILITY'],
-    radar_visibility_cfg=dict(bin=[20, 60, 100], mod_coeff=[0.7, 0.8, 0.9, 1.0]) # bin means num of poitns
 )
 
 
@@ -177,8 +151,10 @@ train_cfg = dict(assigner=assigner)
 
 test_cfg_range = DATASET['ROI'][DATASET['LABEL']['ROI_TYPE']]
 test_cfg_range_label = DATASET['LABEL_ROI'][DATASET['LABEL']['ROI_TYPE']]
+# todo: modify test_cfg
 test_cfg = dict(
     post_center_limit_range=test_cfg_range_label, # [x_min, -y, -z, x_max, y, z] RoI
+    # max_per_img=25,
     nms=dict(
         use_rotate_nms=True,
         use_multi_class_nms=False,
@@ -190,10 +166,8 @@ test_cfg = dict(
     pc_range=[test_cfg_range['x'][0], test_cfg_range['y'][0]],
     out_size_factor=1.,
     voxel_size=[0.4, 0.4],
-    input_type='rdr_tensor',
-    app_emb_save_path='/mnt/nas_kradar/kradar_dataset/app_emb/triplet_all_pos_all_neg' # inside are seq folders
+    input_type='rdr_tensor'
 )
-
 
 # dataset settings
 dataset_type = "KRadarDataset"
@@ -202,46 +176,67 @@ dataset_type = "KRadarDataset"
 
 
 
+train_preprocessor = dict(
+    mode="train",
+    pc_type='rdr_sparse_cube',
+    shuffle_points=True,
+    global_rot_noise=[-0.78539816, 0.78539816],
+    global_scale_noise=[0.9, 1.1],
+    global_translate_std=0.5,
+    class_names=class_names,
+)
+
+val_preprocessor = dict(
+    mode="val",
+    pc_type='rdr_sparse_cube',
+    shuffle_points=False,
+)
+
+voxel_generator = dict(
+    range=(0, -30, -2, 80, 30, 7.2),
+    voxel_size=[0.4, 0.4, 0.4],
+    max_points_in_voxel=5,
+    max_voxel_num=[16000, 16000],
+)
+
 train_pipeline = [
-    # dict(type="LoadRadarData"),  
-    dict(type="AssignLabelRadar", cfg=train_cfg["assigner"], flip_y_prob=0.0),
+    dict(type="PreprocessKradar", cfg=train_preprocessor),
+    dict(type="VoxelizationKradar", cfg=voxel_generator),
+    dict(type="AssignLabelLidar", cfg=train_cfg["assigner"]),
+    dict(type="Reformat"),
+    # dict(type='PointCloudCollect', keys=['points', 'voxels', 'annotations', 'calib']),
 ]
-
-# val_preprocessor = dict(
-# )
 test_pipeline = [
-    # dict(type="LoadRadarData"),  
-    dict(type="AssignLabelRadar", cfg=train_cfg["assigner"]),
+    dict(type="PreprocessKradar", cfg=val_preprocessor),
+    dict(type="VoxelizationKradar", cfg=voxel_generator),
+    dict(type="AssignLabelLidar", cfg=train_cfg["assigner"]),
+    dict(type="Reformat"),
 ]
 
-jde_data_cfg = dict(enable=JDE['enable'], max_frame_length=JDE['max_frame_length'], \
-                    repeat_frames=JDE['repeat_frames'])
 
 data = dict(
     samples_per_gpu=BATCH_SIZE,
     workers_per_gpu=2,
     train=dict(
         type=dataset_type,
-        cfg=dict(DATASET=DATASET, JDE=jde_data_cfg),
+        cfg=dict(DATASET=DATASET),
         split='train',
         class_names=class_names,
         pipeline=train_pipeline,
     ),
     test=dict(
         type=dataset_type,
-        cfg=dict(DATASET=DATASET, JDE=jde_data_cfg),
+        cfg=dict(DATASET=DATASET),
         split='test', # todo: change
         class_names=class_names,
         pipeline=test_pipeline,
-        mode='test'
     ),
     val=dict(
         type=dataset_type,
-        cfg=dict(DATASET=DATASET, JDE=jde_data_cfg),
+        cfg=dict(DATASET=DATASET),
         split='train',
         class_names=class_names,
         pipeline=test_pipeline,
-        mode='val'
     ),
 )
 

@@ -8,9 +8,7 @@ tasks = [
     dict(num_class=2, class_names=["Sedan", "BusorTruck"]),
     # dict(num_class=1, class_names=["Bicycle", "Pedestrian", "Motorcycle"]),
 ]
-
 class_names = list(itertools.chain(*[t["class_names"] for t in tasks]))
-
 # training and testing settings
 target_assigner = dict(
     tasks=tasks,
@@ -25,13 +23,11 @@ JDE=dict(
   embedding_dim=32,
   weight=1.0,
   distance_cfg=dict(
-    type='LpDistance',
-    p=2, 
-    power=1,
+    type='CosineSimilarity',
   ),
   loss_fcn_cfg=dict(
     type='TripletMarginLoss',
-    margin=0.05,
+    margin=0.5,
     swap=False,
     smooth_loss=False,
     triplets_per_anchor="all"
@@ -69,7 +65,7 @@ DATASET = dict(
     ROI_DEFAULT=[0,120,-100,100,-50,50], # x_min_max, y_min_max, z_min_max / Dim: [m]
     IS_CHECK_VALID_WITH_AZIMUTH=True,
     MAX_AZIMUTH_DEGREE=[-50, 50],
-    CONSIDER_RADAR_VISIBILITY=True,
+    CONSIDER_RADAR_VISIBILITY=False,
   ),
   ROI = dict(
     roi1 = {'z': [-2., 7.6], 'y': [-30., 30.], 'x': [0, 80]}
@@ -255,7 +251,7 @@ lr_config = dict(
     type="one_cycle", lr_max=0.001, moms=[0.95, 0.85], div_factor=10.0, pct_start=0.4,
 )
 
-checkpoint_config = dict(interval=5)
+checkpoint_config = dict(interval=2)
 # yapf:disable
 log_config = dict(
     interval=10,

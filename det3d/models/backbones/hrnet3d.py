@@ -14,7 +14,10 @@ class HRNet3D(nn.Module):
         if kwargs['final_conv_in'] == kwargs['final_conv_out']:
             self.final_conv = nn.Identity()
         else:
-            self.final_conv = nn.Conv3d(kwargs['final_conv_in'], kwargs['final_conv_out'], kernel_size=1)
+            if backbone_cfg == 'hrnet':
+                self.final_conv = nn.Conv2d(kwargs['final_conv_in'], kwargs['final_conv_out'], kernel_size=1)
+            else:
+                self.final_conv = nn.Conv3d(kwargs['final_conv_in'], kwargs['final_conv_out'], kernel_size=1)
         
         self.final_fuse = kwargs['final_fuse']
         self.backbone_cfg = backbone_cfg
@@ -31,6 +34,7 @@ class HRNet3D(nn.Module):
                 x = self.feat_transform(x)
             _, _, h, w = x[0].size()
             feats = x[0] # pick the highest resolution feature
+            feats = self.final_conv(feats)
             return feats
         
         # 3D HRNet

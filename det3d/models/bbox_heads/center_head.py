@@ -194,6 +194,7 @@ class CenterHead(nn.Module):
 
         self.crit = FastFocalLoss()
         self.crit_reg = RegLoss()
+        
 
         self.box_n_dim = 9 if 'vel' in common_heads else 7  
         self.use_direction_classifier = False 
@@ -293,7 +294,7 @@ class CenterHead(nn.Module):
         return rets_merged
 
     @torch.no_grad()
-    def predict(self, example, preds_dicts, test_cfg, **kwargs):
+    def predict(self, example, preds_dicts, test_cfg, app_emb_tasks=None, **kwargs):
         """decode, nms, then return the detection result. Additionaly support double flip testing 
         """
         # get loss info
@@ -314,7 +315,7 @@ class CenterHead(nn.Module):
             # convert N C H W to N H W C 
             for key, val in preds_dict.items():
                 preds_dict[key] = val.permute(0, 2, 3, 1).contiguous()
-
+    
             batch_size = preds_dict['hm'].shape[0]
 
             if double_flip:
@@ -334,13 +335,13 @@ class CenterHead(nn.Module):
                     preds_dict[k][:, 2] = torch.flip(preds_dict[k][:, 2], dims=[2])
                     preds_dict[k][:, 3] = torch.flip(preds_dict[k][:, 3], dims=[1, 2])
 
-            if "metadata" in example and len(example["metadata"]) > 0:
+            # K-Radar specific
+            if 'meta' in example:
+                meta_list = example['meta']
+            elif "metadata" in example and len(example["metadata"]) > 0:
                 meta_list = example["metadata"]
                 if double_flip:
                     meta_list = meta_list[:4*int(batch_size):4]
-            # K-Radar specific
-            elif 'meta' in example:
-                meta_list = example['meta']
             else:
                 meta_list = [None] * batch_size
 
@@ -355,6 +356,7 @@ class CenterHead(nn.Module):
             batch_rotc = preds_dict['rot'][..., 1:2]
             batch_reg = preds_dict['reg']
             batch_hei = preds_dict['height']
+
 
             if double_flip:
                 batch_hm = batch_hm.mean(dim=1)
@@ -408,6 +410,8 @@ class CenterHead(nn.Module):
             xs = xs * test_cfg.out_size_factor * test_cfg.voxel_size[0] + test_cfg.pc_range[0]
             ys = ys * test_cfg.out_size_factor * test_cfg.voxel_size[1] + test_cfg.pc_range[1]
 
+            if app_emb_tasks is not None:
+                batch_app_emb = app_emb_tasks[task_id].permute(0, 2, 3, 1).contiguous().reshape(batch, H*W, -1)
             if 'vel' in preds_dict:
                 batch_vel = preds_dict['vel']
 
@@ -429,9 +433,9 @@ class CenterHead(nn.Module):
             metas.append(meta_list)
 
             if test_cfg.get('per_class_nms', False):
-                pass 
+                raise NotImplementedError()
             else:
-                rets.append(self.post_processing(batch_box_preds, batch_hm, test_cfg, post_center_range, task_id)) 
+                rets.append(self.post_processing(batch_box_preds, batch_hm, test_cfg, post_center_range, task_id, batch_app_emb)) 
 
         # Merge branches results
         ret_list = []
@@ -449,6 +453,8 @@ class CenterHead(nn.Module):
                         rets[j][i][k] += flag
                         flag += num_class
                     ret[k] = torch.cat([ret[i][k] for ret in rets])
+                elif k in ['app_emb']:
+                    ret[k] = torch.cat([ret[i][k] for ret in rets]).detach().cpu().numpy()
 
             ret['metadata'] = metas[0][i]
             ret_list.append(ret)
@@ -456,7 +462,7 @@ class CenterHead(nn.Module):
         return ret_list 
 
     @torch.no_grad()
-    def post_processing(self, batch_box_preds, batch_hm, test_cfg, post_center_range, task_id):
+    def post_processing(self, batch_box_preds, batch_hm, test_cfg, post_center_range, task_id, batch_app_emb=None):
         batch_size = len(batch_hm)
 
         prediction_dicts = []
@@ -491,14 +497,15 @@ class CenterHead(nn.Module):
             selected_boxes = box_preds[selected]
             selected_scores = scores[selected]
             selected_labels = labels[selected]
-
-
             box3d_key = 'box3d_lidar' if test_cfg.input_type=='pc' else 'box3d'
             prediction_dict = {
                  box3d_key: selected_boxes,
                 'scores': selected_scores,
                 'label_preds': selected_labels
             }
+            if batch_app_emb is not None:
+                selected_emb = batch_app_emb[i][selected]
+                prediction_dict.update({'app_emb': selected_emb})
             prediction_dicts.append(prediction_dict)
 
         return prediction_dicts 

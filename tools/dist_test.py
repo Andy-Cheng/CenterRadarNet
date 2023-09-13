@@ -175,6 +175,7 @@ def main():
     logger.info(f'Model parameter count: {count_parameters(model)}')
     
 
+    cfg['DATASET']['MODE'] = 'test'
     if args.testset:
         print("Use Test Set")
         dataset = build_dataset(cfg.data.test)
@@ -259,6 +260,11 @@ def main():
                 seq_name = output['metadata']['seq']
                 frame_name = output['metadata']['frame']
                 rdr_frame_name = output['metadata']['rdr_frame']
+                if 'app_emb' in output:
+                    app_emb = output.pop('app_emb')
+                    save_path = os.path.join(cfg.test_cfg.app_emb_save_path, seq_name)
+                    os.makedirs(save_path, exist_ok=True)
+                    np.save(os.path.join(save_path, f'{frame_name}.npy'), app_emb)
                 detections.update(
                     {f'{seq_name}/{frame_name}/{rdr_frame_name}': output,}
                 )
@@ -271,7 +277,10 @@ def main():
 
     all_predictions = all_gather(detections)
 
-    print("\n Total time per frame: ", (time_end -  time_start) / (end - start)) # TODO: fix bug
+    try:
+        print("\n Total time per frame: ", (time_end -  time_start) / (end - start)) # TODO: fix bug
+    except:
+        pass
 
     if args.local_rank != 0:
         return
