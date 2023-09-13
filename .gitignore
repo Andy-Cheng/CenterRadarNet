@@ -19,3 +19,4 @@ apex
 *.npy
 *.png
 *.jpg
+tmp*
