@@ -16,7 +16,7 @@ target_assigner = dict(
     tasks=tasks,
 )
 
-BATCH_SIZE=16
+BATCH_SIZE=1
 
 JDE=dict(
   enable=False,

@@ -410,6 +410,7 @@ class CenterHead(nn.Module):
             xs = xs * test_cfg.out_size_factor * test_cfg.voxel_size[0] + test_cfg.pc_range[0]
             ys = ys * test_cfg.out_size_factor * test_cfg.voxel_size[1] + test_cfg.pc_range[1]
 
+            batch_app_emb = None
             if app_emb_tasks is not None:
                 batch_app_emb = app_emb_tasks[task_id].permute(0, 2, 3, 1).contiguous().reshape(batch, H*W, -1)
             if 'vel' in preds_dict:

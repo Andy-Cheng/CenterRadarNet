@@ -8,7 +8,9 @@ tasks = [
     dict(num_class=2, class_names=["Sedan", "BusorTruck"]),
     # dict(num_class=1, class_names=["Bicycle", "Pedestrian", "Motorcycle"]),
 ]
+
 class_names = list(itertools.chain(*[t["class_names"] for t in tasks]))
+
 # training and testing settings
 target_assigner = dict(
     tasks=tasks,
@@ -17,25 +19,27 @@ target_assigner = dict(
 BATCH_SIZE=1
 
 JDE=dict(
-  enable=True,
+  enable=False,
   max_frame_length=5,
   repeat_frames=True,
   embedding_dim=32,
   weight=1.0,
   distance_cfg=dict(
-    type='CosineSimilarity',
+    type='LpDistance',
+    p=2, 
+    power=1,
   ),
   loss_fcn_cfg=dict(
     type='TripletMarginLoss',
-    margin=0.5,
+    margin=0.05,
     swap=False,
     smooth_loss=False,
     triplets_per_anchor="all"
   ),
   miner_cfg=dict(
     type='BatchEasyHardMiner',
-    pos_strategy='easy',
-    neg_strategy='hard'
+    pos_strategy='all',
+    neg_strategy='all'
   ),
   reducer_cfg=dict(
     type='AvgNonZeroReducer'
@@ -47,14 +51,17 @@ JDE=dict(
   )
 )
 
+
 DATASET = dict(
   DIR=dict(
-    DATA_ROOT='/mnt/ssd1/kradar_dataset',
+    DATA_ROOT='/mnt/nas_kradar/kradar_dataset',
     DEAR_DIR='/mnt/ssd1/kradar_dataset/radar_tensor',
     RDR_CUBE_DIR='/mnt/ssd1/kradar_dataset/radar_tensor_zyx',
     LIDAR_PC_DIR='/mnt/nas_kradar/kradar_dataset/dir_all',
-    RDR_CALIB='/mnt/ssd1/kradar_dataset/resources/calib/calib_radar_lidar.json',
-    CAM_CALIB='/mnt/ssd1/kradar_dataset/resources/calib/calib_frontcam_lidar.json',
+    RDR_PC_DIR='/mnt/nas_kradar/kradar_dataset/dir_all',
+    RDR_PC_TYPE='cart_cacfar_15_5_150_150_power',
+    RDR_CALIB='/mnt/nas_kradar/kradar_dataset/resources/calib/calib_radar_lidar.json',
+    CAM_CALIB='/mnt/nas_kradar/kradar_dataset/resources/calib/calib_frontcam_lidar.json',
     LABEL_FILE='/mnt/ssd1/kradar_dataset/labels/refined_v3numpoints.json',
     START_END_FILE='/mnt/ssd1/kradar_dataset/labels/seq_start_end.json'
   ),
@@ -73,6 +80,10 @@ DATASET = dict(
   LABEL_ROI=dict(
     roi1=[0, -15, -2, 72, 15, 7.6] # [xyz_min, xyz_max]
   ),
+  RDR_SP_CUBE=dict(
+    NORMALIZING_VALUE=1e+13,
+  )
+  ,
   RDR_CUBE = dict(
       DOPPLER=dict(
         IS_ANOTHER_DIR=True,
@@ -108,9 +119,9 @@ DATASET = dict(
   
     # List of items to be returned by the dataloader
     GET_ITEM= {
-      'rdr_sparse_cube'   : False,
+      'rdr_sparse_cube'   : True,
       'rdr_tesseract'     : False,
-      'rdr_cube'          : True,
+      'rdr_cube'          : False,
       'rdr_cube_doppler'  : False,
       'ldr_pc_64'         : False,
       'cam_front_img'     : False,
@@ -123,33 +134,41 @@ DATASET = dict(
 hr_final_conv_out = 16
 feature_height_before_head = ceil((DATASET['ROI'][DATASET['LABEL']['ROI_TYPE']]['z'][1] - DATASET['ROI'][DATASET['LABEL']['ROI_TYPE']]['z'][0])/DATASET['RDR_CUBE']['GRID_SIZE'])
 
+radar_feat_dim = 4
+
+
 # model settings
 model = dict(
-    type="RadarNetSingleStage",
-    jde_cfg=JDE,
+    type="PointPillars",
     pretrained=None,
     reader=dict(
-        type='RadarFeatureNet',
+        type="PillarFeatureNet",
+        num_filters=[64, 64],
+        num_input_features=radar_feat_dim,
+        with_distance=False,
+        voxel_size=(0.4, 0.4, 9.6),
+        pc_range=(0, -30, -2, 80, 30, 7.6),
     ),
-    backbone=dict(
-        type="HRNet3D",
-        backbone_cfg='hr_tiny_feat16_zyx_l4',
-        final_conv_in = 16,
-        final_conv_out = hr_final_conv_out,
-        final_fuse = 'top',
-        ds_factor=1,
+    backbone=dict(type="PointPillarsScatter", ds_factor=1),
+    neck=dict(
+        type="RPN",
+        layer_nums=[5, 5],
+        ds_layer_strides=[1, 2],
+        ds_num_filters=[64, 128],
+        us_layer_strides=[1, 2],
+        us_num_filters=[128, 128],
+        num_input_features=64,
+        logger=logging.getLogger("RPN"),
     ),
-
-    # todo: modify neck and head config 
-    neck=None,
     bbox_head=dict(
+        # type='RPNHead',
         type="CenterHead",
-        in_channels=hr_final_conv_out*feature_height_before_head, # 384
+        in_channels=sum([128, 128]),
         tasks=tasks,
         dataset='kradar',
         weight=0.25,
-        code_weights=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], # weight of loss from common_heads
-        common_heads={'reg': (2, 2), 'height': (1, 2), 'dim':(3, 2), 'rot':(2, 2)}, # (num output feat maps, )
+        code_weights=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        common_heads={'reg': (2, 2), 'height': (1, 2), 'dim':(3, 2), 'rot':(2, 2)}, # (output_channel, num_conv),
         share_conv_channel=64,
         dcn_head=False
     ),
@@ -187,9 +206,8 @@ test_cfg = dict(
     out_size_factor=1.,
     voxel_size=[0.4, 0.4],
     input_type='rdr_tensor',
-    app_emb_save_path='/mnt/nas_kradar/kradar_dataset/app_emb/triplet_cosine_one_pos_hard_neg' # inside are seq folders
+    app_emb_save_path='' # inside are seq folders
 )
-
 
 # dataset settings
 dataset_type = "KRadarDataset"
@@ -198,16 +216,41 @@ dataset_type = "KRadarDataset"
 
 
 
-train_pipeline = [
-    # dict(type="LoadRadarData"),  
-    dict(type="AssignLabelRadar", cfg=train_cfg["assigner"], flip_y_prob=0.0),
-]
+train_preprocessor = dict(
+    mode="train",
+    pc_type='rdr_sparse_cube',
+    shuffle_points=True,
+    global_rot_noise=[-0.78539816, 0.78539816],
+    global_scale_noise=[0.9, 1.1],
+    global_translate_std=0.5,
+    class_names=class_names,
+)
 
-# val_preprocessor = dict(
-# )
+val_preprocessor = dict(
+    mode="val",
+    pc_type='rdr_sparse_cube',
+    shuffle_points=False,
+)
+
+voxel_generator = dict(
+    range=(0, -30, -2, 80, 30, 7.6),
+    voxel_size=[0.4, 0.4, 9.6],
+    max_points_in_voxel=5,
+    max_voxel_num=[16000, 16000],
+)
+
+train_pipeline = [
+    dict(type="PreprocessKradar", cfg=train_preprocessor),
+    dict(type="VoxelizationKradar", cfg=voxel_generator),
+    dict(type="AssignLabelLidar", cfg=train_cfg["assigner"]),
+    dict(type="Reformat"),
+    # dict(type='PointCloudCollect', keys=['points', 'voxels', 'annotations', 'calib']),
+]
 test_pipeline = [
-    # dict(type="LoadRadarData"),  
-    dict(type="AssignLabelRadar", cfg=train_cfg["assigner"]),
+    dict(type="PreprocessKradar", cfg=val_preprocessor),
+    dict(type="VoxelizationKradar", cfg=voxel_generator),
+    dict(type="AssignLabelLidar", cfg=train_cfg["assigner"]),
+    dict(type="Reformat"),
 ]
 
 jde_data_cfg = dict(enable=JDE['enable'], max_frame_length=JDE['max_frame_length'], \

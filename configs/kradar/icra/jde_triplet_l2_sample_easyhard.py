@@ -189,7 +189,7 @@ test_cfg = dict(
     out_size_factor=1.,
     voxel_size=[0.4, 0.4],
     input_type='rdr_tensor',
-    app_emb_save_path='/mnt/nas_kradar/kradar_dataset/app_emb/triplet_all_pos_all_neg' # inside are seq folders
+    app_emb_save_path='/mnt/nas_kradar/kradar_dataset/app_emb/triplet_l2_one_pos_hard_neg' # inside are seq folders
 )
 
 

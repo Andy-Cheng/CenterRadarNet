@@ -10,7 +10,6 @@ HRNET3D_Tiny_Feat32.LAYER1 = CN()
 HRNET3D_Tiny_Feat32.LAYER1.INPLANES = 32 # 32 for doppler dimension
 HRNET3D_Tiny_Feat32.LAYER1.BLOCK = "ResNetBlock"
 
-
 HRNET3D_Tiny_Feat32.STAGE2 = CN()
 HRNET3D_Tiny_Feat32.STAGE2.INPLANES = 32 
 HRNET3D_Tiny_Feat32.STAGE2.NUM_MODULES = 1
@@ -120,5 +119,4 @@ MODEL_CONFIGS = {
     "hr_tiny_feat16_zyx": HRNET3D_Tiny_Feat16_zyx,
     "hr_tiny_feat16_zyx_l4": HRNET3D_Tiny_Feat16_zyx_l4,
     "hr_small_feat16_zyx_l4": HRNET3D_Small_Feat16_zyx_l4,
-
 }

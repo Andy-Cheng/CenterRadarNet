@@ -2,13 +2,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from ..registry import BACKBONES
-from .hr_util import *
+from .hr_util.hr3d import *
 from .. import builder
 
 @BACKBONES.register_module
 class HRNet3D(nn.Module):
 
-    def __init__(self, backbone_cfg='hrnet3D', feat_transform=None, **kwargs):
+    def __init__(self, backbone_cfg='hr_tiny_feat16_zyx_l4', feat_transform=None, **kwargs):
         super(HRNet3D, self).__init__()
         self.backbone = HRNetBackbone(backbone_cfg)()
         if kwargs['final_conv_in'] == kwargs['final_conv_out']:
@@ -64,10 +64,3 @@ class HRNet3D(nn.Module):
             N, C, D, H, W = feats.shape
             feats = feats.view(N, C * D, H, W)
         return feats
-    
-if __name__ == '__main__':
-    # test models with dummy data
-    hrnet3d = HRNet3D()
-    dummy_radar = torch.rand(1 ,1, 24, 32, 176)
-    out = hrnet3d(dummy_radar)
-    print(out.shape)

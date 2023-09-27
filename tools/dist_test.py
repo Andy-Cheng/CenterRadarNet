@@ -262,9 +262,9 @@ def main():
                 rdr_frame_name = output['metadata']['rdr_frame']
                 if 'app_emb' in output:
                     app_emb = output.pop('app_emb')
-                    save_path = os.path.join(cfg.test_cfg.app_emb_save_path, seq_name)
-                    os.makedirs(save_path, exist_ok=True)
-                    np.save(os.path.join(save_path, f'{frame_name}.npy'), app_emb)
+                    # save_path = os.path.join(cfg.test_cfg.app_emb_save_path, seq_name)
+                    # os.makedirs(save_path, exist_ok=True)
+                    # np.save(os.path.join(save_path, f'{frame_name}.npy'), app_emb)
                 detections.update(
                     {f'{seq_name}/{frame_name}/{rdr_frame_name}': output,}
                 )

@@ -49,6 +49,7 @@ class RadarNetSingleStage(SingleStageDetector):
     def forward(self, example, return_loss=True, **kwargs):
         x = self.extract_feat(example)
         preds, shared_conv_feat = self.bbox_head(x)
+        app_emb_tasks = None
         if self.jde_loss is not None:
             app_emb_tasks = []
             for task_id, task in enumerate(self.tasks):
