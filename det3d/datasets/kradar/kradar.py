@@ -19,7 +19,7 @@ import open3d as o3d
 class KRadarDataset(Dataset):
     def __init__(self, cfg, split, class_names=None, pipeline=None, mode='train'):
         super().__init__()
-        cfg = DefaultMunch.fromDict(cfg) # if cfg is dict
+        cfg = DefaultMunch.fromDict(cfg)
         self.class_names = class_names
         self.cfg = cfg
         self.enable_jde = getattr(cfg.JDE, 'enable', False)
@@ -65,10 +65,6 @@ class KRadarDataset(Dataset):
             self.is_consider_roi_rdr_cb = cfg.DATASET.RDR_CUBE.IS_CONSIDER_ROI
             if self.is_consider_roi_rdr_cb:
                 self.consider_roi_cube(cfg.DATASET.ROI[cfg.DATASET.LABEL['ROI_TYPE']])
-            # self.is_get_cube_dop = cfg.DATASET.GET_ITEM['rdr_cube_doppler']
-            # self.offset_doppler = cfg.DATASET.RDR_CUBE.DOPPLER.OFFSET
-            # self.is_dop_another_dir = cfg.DATASET.RDR_CUBE.DOPPLER.IS_ANOTHER_DIR
-            # self.dir_dop = cfg.DATASET.DIR.DIR_DOPPLER_CB
         ### Radar Cube  ###
 
         ### Label ###
@@ -90,37 +86,6 @@ class KRadarDataset(Dataset):
         else:
             self.pipeline = Compose(pipeline)
         self._set_group_flag()
-        # self.initialize_dear_shared_buffer()
-        # self.init_dear_buffer()
-
-        # debug memory usage
-        # debug_path = '/mnt/ssd1/kradar_dataset/radar_tensor/4/radar_DEAR_D_downsampled_2/tesseract_00116.npy'
-        # self.arr_dear = np.maximum(np.flip(np.load(debug_path), axis=1), 0.) # elevation-axis is flipped
-        # idx_r_0, idx_r_1, idx_a_0, idx_a_1, \
-        #     idx_e_0, idx_e_1 = self.list_roi_idx
-        # self.arr_dear = self.arr_dear[:, idx_e_0:idx_e_1+1,\
-        #     idx_a_0:idx_a_1+1, idx_r_0:idx_r_1+1]
-        # self.arr_dear = torch.from_numpy(self.arr_dear)
-        # self.arr_dear = torch.empty((32, 37, 107, 256))
-        # debug memory usage
-
-    # def initialize_dear_shared_buffer(self):
-    #     # Shared memory buffer
-    #     buffer_size = 200
-    #     array_shape = (32, 37, 107, 256)
-    #     self.buffer = Array('f', buffer_size * np.prod((32, 37, 107, 256)))
-    #     self.buffer = np.frombuffer(self.buffer.get_obj()).reshape((buffer_size,) + array_shape)
-        
-    #     # Synchronization
-    #     self.lock = Lock()
-    #     # Atomic counter for buffer index
-    #     self.counter = Value('i', 0)
-
-    # def init_dear_buffer(self):
-    #     idx_r_0, idx_r_1, idx_a_0, idx_a_1, idx_e_0, idx_e_1 = self.list_roi_idx
-    #     self.dear_buffer = np.empty((self.cfg.DATASET.DEAR_BUFFER_SIZE, 32, idx_e_1-idx_e_0+1, idx_a_1-idx_a_0+1, idx_r_1-idx_r_0+1), dtype=np.float32)
-    #     self.counter = 0
-
 
     def _set_group_flag(self):
         self.flag = np.ones(len(self), dtype=np.uint8)
@@ -180,13 +145,6 @@ class KRadarDataset(Dataset):
         else:
             self.samples = samples
             
-        # for debug
-        # new_samples = []
-        # for sample in self.samples:
-        #     if sample['seq'] == '12' and int(sample['frame']) == 88:
-        #         new_samples.append(sample)
-        # self.samples = new_samples
-
     # physical valuses of each DEAR tensors' cell
     def load_physical_values(self, is_in_rad=True, is_with_doppler=False):
         temp_values = loadmat(os.path.join(self.cfg.DATASET.DIR.DATA_ROOT, 'resources', 'info_arr.mat'))
@@ -251,7 +209,6 @@ class KRadarDataset(Dataset):
         if max_val > arr[-1]:
             return arr[idx_min:idx_max+1], idx_min, idx_max
         return arr[idx_min:idx_max], idx_min, idx_max-1
-    ### General functions ###
 
     ### Loading values from txt ###
     def get_calib(self, ):
@@ -391,60 +348,10 @@ class KRadarDataset(Dataset):
         f = open(path_label, 'r')
         line = f.readlines()[0]
         f.close()
-
         seq_id = path_label.split('/')[-3]
         rdr_idx, ldr_idx, camf_idx, _, _ = line.split(',')[0].split('=')[1].split('_')
-
         return seq_id, rdr_idx, ldr_idx, camf_idx
 
-    def get_path_data_from_path_label(self, path_label):
-        seq_id, radar_idx, lidar_idx, camf_idx = self.get_data_indices(path_label)
-        path_header = path_label.split('/')[:-2]
-
-        ### Sparse tensor
-        path_radar_sparse_cube = None
-        if self.is_get_sparse_cube:
-            if self.is_sp_another_dir:
-                path_radar_sparse_cube = os.path.join(self.dir_sp, path_header[-1], self.name_sp_cube, 'spcube_'+radar_idx+'.npy')
-            else:
-                path_radar_sparse_cube = '/'+os.path.join(*path_header, self.name_sp_cube, 'spcube_'+radar_idx+'.npy')
-
-        path_radar_tesseract = '/'+os.path.join(*path_header, 'radar_tesseract_DEAR_npy', 'tesseract_'+radar_idx+'.npy')
-        # path_radar_cube = '/'+os.path.join(*path_header, 'radar_zyx_cube', 'cube_'+radar_idx+'.mat')
-        # path_radar_cube = '/'+os.path.join(*path_header, 'radar_zyx_cube_npy_f32', 'cube_'+radar_idx+'.npy')
-        path_radar_cube = '/'+os.path.join(*path_header, 'radar_zyx_cube_npy_roi', 'cube_'+radar_idx+'.npy')
-
-        path_lidar_pc_64 = '/'+os.path.join(*path_header, 'os2-64', 'os2-64_'+lidar_idx+'.pcd')
-        path_cam_front = '/'+os.path.join(*path_header, 'cam-front', 'cam-front_'+camf_idx+'.png')
-        path_calib = '/'+os.path.join(*path_header, 'info_calib', 'calib_radar_lidar.txt')
-        path_desc = '/'+os.path.join(*path_header, 'description.txt')
-
-        ### In different folder
-        path_radar_cube_doppler = None
-        if self.is_get_cube_dop:
-            if self.is_dop_another_dir:
-                path_radar_cube_doppler = os.path.join(self.dir_dop, path_header[-1], 'radar_cube_doppler', 'radar_cube_doppler_'+radar_idx+'.mat')
-            else:
-                path_radar_cube_doppler = '/'+os.path.join(*path_header, 'radar_cube_doppler', 'radar_cube_doppler_'+radar_idx+'.mat')
-
-        ### Currently not used
-        # path_radar_bev_img = '/'+os.path.join(*path_header, 'radar_bev_image', 'radar_bev_100_'+radar_idx+'.png')
-        # path_lidar_bev_img = '/'+os.path.join(*path_header, 'lidar_bev_image', 'lidar_bev_100_'+lidar_idx+'.png')
-        # path_lidar_pc_128 = '/'+os.path.join(*path_header, 'os1-128', 'os1-128_'+lidar_idx+'.pcd')
-
-        dict_path = {
-            'rdr_sparse_cube'   : path_radar_sparse_cube,
-            'rdr_tesseract'     : path_radar_tesseract,
-            'rdr_cube'          : path_radar_cube,
-            'rdr_cube_doppler'  : path_radar_cube_doppler,
-            'ldr_pc_64'         : path_lidar_pc_64,
-            'cam_front_img'     : path_cam_front,
-            'path_calib'        : path_calib,
-            'path_desc'         : path_desc,
-            'path_label'        : path_label,
-        }
-
-        return dict_path
     def get_second_sample_idx(self, idx, seq):
         start_end = self.seq_start_end[seq]
         target_bin = None
@@ -456,8 +363,6 @@ class KRadarDataset(Dataset):
         right_edge = min(idx+self.cfg.JDE.max_frame_length, target_bin[1])
         idx_2 = np.random.choice([*range(left_edge, idx), *range(idx+1, right_edge+1)])
         return idx_2
-
-
 
     def get_sample_by_idx(self, idx):
         sample = self.samples[idx]
@@ -487,11 +392,8 @@ class KRadarDataset(Dataset):
             return dict_item
         
     def evaluation(self, detections, output_dir=None, testset=False):
-        # TODO: implement the evaluation
-
-
+        # TODO: integrate the evaluation code to here
         res = None
-
         return res, None
     
     @staticmethod
@@ -553,7 +455,7 @@ class KRadarDataset(Dataset):
 '''
 New label format example:
 
-data = [frame_info]
+data = {'train': [frame_info], 'test'; [frame_info]}
 frame_info = 
     {
         "seq",
@@ -566,21 +468,20 @@ obj =
         "obj_id": "0",
         "obj_type": "Sedan",
         "euler": [
-        0.028713687634213336,
-        -1.5706896719911638,
-        1.5620672579302894
+        0,
+        0,
+        0.011563076580653683
         ],
         "xyz": [
-        5.095513326251193,
-        0.2371579400743387,
-        25.564737699514197
+        21.533344860569517,
+        -3.5592597474205974,
+        0.3055397143112053
         ],
         "lwh": [
-        3.280036683179418,
-        1.9069884147384841,
-        1.4570745923842519
+        3.4579122180458848,
+        1.7079880922772295,
+        1.3824741692813867
         ]
     }
 obj pose in lidar coordinate
-
 '''
