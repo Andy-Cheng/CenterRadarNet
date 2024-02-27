@@ -3,7 +3,7 @@ from collections import defaultdict
 
 if __name__ == '__main__':
     seq_start_end = {}
-    with open('/mnt/ssd1/kradar_dataset/labels/refined_v3.json', 'r')  as f:
+    with open('/mnt/ssd1/kradar_dataset/labels/refined_allv3numpoints.json', 'r')  as f:
         label = json.load(f)
     for split_type, data in label.items():
         seq_start_end[split_type] = defaultdict(list)

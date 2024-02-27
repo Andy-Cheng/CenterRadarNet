@@ -274,8 +274,7 @@ def train_detector(model, dataset, cfg, distributed=False, validate=False, logge
         cfg.lr_config = None
     else:
         optimizer = build_optimizer(model, cfg.optimizer)
-        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=cfg.drop_step, gamma=.1)
-        # lr_scheduler = None
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=cfg.lr_config.drop_step, gamma=cfg.lr_config.gamma)
         cfg.lr_config = None 
 
     # put model on gpus

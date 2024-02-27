@@ -63,12 +63,6 @@ def parse_args():
 
 
 def main():
-
-    # torch.manual_seed(0)
-    # torch.backends.cudnn.deterministic = True
-    # torch.backends.cudnn.benchmark = False
-    # np.random.seed(0)
-
     args = parse_args()
 
     cfg = Config.fromfile(args.config)
@@ -76,6 +70,8 @@ def main():
     # update configs according to CLI args
     if args.work_dir is not None:
         cfg.work_dir = args.work_dir
+    else:
+        cfg.work_dir = os.path.join("./work_dirs", os.path.basename(args.config[:-3]), datetime.now().strftime('%Y%m%d_%H%M%S'))
     if args.resume_from is not None:
         cfg.resume_from = args.resume_from
     os.environ["CUDA_VISIBLE_DEVICES"] = cfg.cuda_device
@@ -137,12 +133,17 @@ def main():
     log_file_handler.setFormatter(formatter)
     # Add the handler to the logger
     logger.addHandler(log_file_handler)
+
+    # save config file to work_dir
+    if args.local_rank == 0:
+        with open(os.path.join(cfg.work_dir, f'exp_config.py'), 'w') as f:
+            f.write(cfg.text)
+
+
     logger.info("Config")
     logger.info(cfg.text)
     logger.info("Distributed training: {}".format(distributed))
     logger.info(f"torch.backends.cudnn.benchmark: {torch.backends.cudnn.benchmark}")
-
-
 
     # set random seeds
     if args.seed is not None:

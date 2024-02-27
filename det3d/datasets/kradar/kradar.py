@@ -107,6 +107,7 @@ class KRadarDataset(Dataset):
         if os.path.exists(new_file_path):
             pre_process_label = False
             label_file = new_file_path
+            self.label_file = label_file
         with open(label_file, 'r') as f:
             samples = json.load(f)[self.split]
         self.samples = []
@@ -142,6 +143,7 @@ class KRadarDataset(Dataset):
             new_labels[self.split] = self.samples
             with open(new_file_path, 'w') as f:
                 json.dump(new_labels, f, indent=2)
+            self.label_file = label_file
         else:
             self.samples = samples
             
@@ -272,9 +274,11 @@ class KRadarDataset(Dataset):
         idx_z_min, idx_z_max, idx_y_min, idx_y_max, idx_x_min, idx_x_max = self.list_roi_idx_cb
         arr_cube = arr_cube[idx_z_min:idx_z_max+1,idx_y_min:idx_y_max+1,idx_x_min:idx_x_max+1]
         arr_cube[arr_cube < 0.] = 0.
-        # normalize
         arr_cube = arr_cube / norm_val
+        # arr_cube[arr_cube < 1.] = 1.
+        # arr_cube = arr_cube
         return arr_cube
+    
         
     def get_cube_direct(self, path_cube):
         '''

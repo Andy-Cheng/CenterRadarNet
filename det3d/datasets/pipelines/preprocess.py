@@ -486,6 +486,7 @@ class AssignLabelRadar(object):
         self._max_objs = assigner_cfg.max_objs
         self._min_radius = assigner_cfg.min_radius
         self._consider_radar_visibility = getattr(assigner_cfg, "consider_radar_visibility", False)
+        self.expand_channel_dim = getattr(assigner_cfg, "expand_channel_dim", True)
         self.cfg = assigner_cfg
         if "flip_y_prob" in kwargs:
             self.flip_y_prob = kwargs["flip_y_prob"]
@@ -512,18 +513,23 @@ class AssignLabelRadar(object):
         if is_tesseract:
             rdr_tensor = res['rdr_tesseract']
         else:
-            rdr_tensor = np.expand_dims(res['rdr_cube'], axis=0) # (1, Z, Y, X)
-
+            if self.expand_channel_dim:
+                rdr_tensor = np.expand_dims(res['rdr_cube'], axis=0) # (1, Z, Y, X)
+            else:
+                rdr_tensor = res['rdr_cube']
         if res["mode"] == "train":
             # Data augmentation
             # res['label'],  rdr_tensor, info.DATASET.RDR_CUBE.ROI  = random_flip_y(res['label'], rdr_tensor, \
             #                                                                            info.DATASET.RDR_CUBE.ROI, self.flip_y_prob)
 
             # Calculate output featuremap size
-            radar_range = np.array(list(dict(info.DATASET.ROI[info.DATASET.LABEL.ROI_TYPE]).values()), dtype=np.float32).transpose().flatten() # order: (zyx_min, zyx_max)
+            roi_yx = {}
+            roi_yx['y'] = info.DATASET.ROI[info.DATASET.LABEL.ROI_TYPE]['y']
+            roi_yx['x'] = info.DATASET.ROI[info.DATASET.LABEL.ROI_TYPE]['x']
+            radar_range = np.array(list(dict(roi_yx).values()), dtype=np.float32).transpose().flatten() # order: (yx_min, yx_max)
             voxel_size = info.DATASET.RDR_CUBE.GRID_SIZE
-            grid_size_y = len(np.arange(radar_range[1], radar_range[4], voxel_size))
-            grid_size_x = len(np.arange(radar_range[2], radar_range[5], voxel_size))
+            grid_size_y = len(np.arange(radar_range[0], radar_range[2], voxel_size))
+            grid_size_x = len(np.arange(radar_range[1], radar_range[3], voxel_size))
             feature_map_size = np.array((grid_size_y, grid_size_x)) // self.out_size_factor # feature map is in BEV
             # prepare the gt by tasks
             gt_classnames = []
@@ -561,8 +567,8 @@ class AssignLabelRadar(object):
                         radius = max(self._min_radius, int(radius))
                         # be really careful for the coordinate system of your box annotation. 
                         x, y, z = gt_box_task[k][1:4]
-                        coor_x, coor_y = (x - radar_range[2]) / voxel_size / self.out_size_factor, \
-                                         (y - radar_range[1]) / voxel_size / self.out_size_factor
+                        coor_x, coor_y = (x - radar_range[1]) / voxel_size / self.out_size_factor, \
+                                         (y - radar_range[0]) / voxel_size / self.out_size_factor
                         ct = np.array(
                             [coor_x, coor_y], dtype=np.float32) 
                         ct_int = ct.astype(np.int32)

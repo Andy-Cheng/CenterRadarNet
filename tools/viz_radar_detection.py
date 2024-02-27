@@ -167,43 +167,142 @@ seq_to_offset = {
     '54': 6
 }
 
+import matplotlib.patches as patches
+
+
+class RotatingRectangle(patches.Rectangle):
+    def __init__(self, xy, width, height, rel_point_of_rot, **kwargs):
+        super().__init__(xy, width, height, **kwargs)
+        self.rel_point_of_rot = rel_point_of_rot
+        self.xy_center = self.get_xy()
+        self.set_angle(self.angle)
+
+    def _apply_rotation(self):
+        angle_rad = self.angle * np.pi / 180
+        m_trans = np.array([[np.cos(angle_rad), -np.sin(angle_rad)],
+                            [np.sin(angle_rad), np.cos(angle_rad)]])
+        shift = -m_trans @ self.rel_point_of_rot
+        self.set_xy(self.xy_center + shift)
+
+    def set_angle(self, angle):
+        self.angle = angle
+        self._apply_rotation()
+
+    def set_rel_point_of_rot(self, rel_point_of_rot):
+        self.rel_point_of_rot = rel_point_of_rot
+        self._apply_rotation()
+
+    def set_xy_center(self, xy):
+        self.xy_center = xy
+        self._apply_rotation()
+
+# Get the jet colormap
+jet = plt.get_cmap('jet')
+
+# Create an array with the colors of the jet colormap
+colors = jet(np.arange(jet.N))
+
+# Set the RGBA value for zero values to be white (or any other color)
+colors[0, :] = np.array([1, 1, 1, 1])  # RGBA value
+import matplotlib.colors as mcolors
+# Create a new colormap from those colors
+new_cmap = mcolors.LinearSegmentedColormap.from_list('new_jet', colors)
+
+
+
+def viz_radar_cube_bev_tracking(dataset, seq, frame_id, rdr_frame_id, gt_objs, viz_dir, tracking_id_to_color, used_colors, magnifying=1.):
+    # if frame_id != '00470':
+    #     return tracking_id_to_color, used_colors
+    rdr_cube_bev = np.log10(dataset.get_cube(seq, rdr_frame_id)).max(axis=0) # rdr_cube in Y-X\
+
+    rdr_cube_bev = np.transpose(rdr_cube_bev)
+
+    ### Jet map visualization ###
+    # rdr_cube_bev[np.where(rdr_cube_bev==0.)] = -np.inf # for visualization
+    fig, ax = plt.subplots(1, 1, figsize=(16, 9))
+    # show corresponding image
+    ax.axis('off')
+
+    ax.imshow(rdr_cube_bev[::-1, :],cmap=new_cmap, vmin=10.0,vmax=20)
+    # ax.set_xlim([0,rdr_cube_bev.shape[1]])
+    # ax.set_ylim([rdr_cube_bev.shape[0],0])
+
+    
+    for gt_obj in gt_objs: # (cls_name, idx_cls, [x,y,z,theta,l,w,h], idx_obj)
+        cls_name, obj_id, [x, y, z, theta, xl, yl, zl] = gt_obj
+        if obj_id in tracking_id_to_color:
+            clr = tracking_id_to_color[obj_id]
+        else:
+            clr = rand_colors()
+            while clr in used_colors:
+                clr = rand_colors()
+            tracking_id_to_color[obj_id] = clr
+        
+        xl, yl, zl = magnifying * xl, magnifying * yl, magnifying * zl# TODO: set magnifying for better viz.
+        # if cls_name not in ['Car', 'Pedestrian']  or x > 29 or y > 10 or y < -10 or z > 7.6 or z < -2:
+        #     continue
+        bbx_length = xl / 0.4
+        bbx_width = yl /0.4
+
+        # with rotation
+        # rot  = -theta + 180
+        rot  = -theta * 180 / np.pi
+
+        bbx_cx=(80-0- x) / 0.4
+        bbx_cy=abs((y-30)/0.4)
+
+        rect1 = RotatingRectangle((bbx_cy,bbx_cx), width=bbx_width, height=bbx_length, 
+                        rel_point_of_rot=np.array([bbx_width/2, bbx_length/2]),
+                        angle=rot,fill=None,edgecolor=tracking_id_to_color[obj_id],linewidth=4)
+        
+        ax.add_patch(rect1)
+        
+    fig.savefig(os.path.join(viz_dir, f'{frame_id}.png'))
+    plt.close()
+    return tracking_id_to_color, used_colors
+
+
 def viz_tracking():
-    root_dir = '/home/andy/Desktop/ee549 pred file kradar/SCT_with_rotation/SCT'
-    viz_root = '/home/andy/Desktop/ee549 pred file kradar/SCT_with_rotation'
-    detection_path = 'work_dirs_tmp/HRTiny_feat16_small_clean_final_concat_train_pred/epoch_40/train_prediction.pkl'
     args = parse_args()
     cfg = Config.fromfile(args.config)
 
-    # manually modify rdr cube ROI for viz
-    cfg.data.test.cfg.DATASET.RDR_CUBE.ROI = { # each bin is 0.4 [m] (minimum range resolution)
-      'z': [-2, 6.],     # Dim: [m] / [-2.0, 5.6] for Driving corridor
-      'y': [-20., 20.], # Dim: [m] / [-6.4, 6.0] for Driving corridor
-      'x': [0., 80.],     # Dim: [m] / [0.0, 71.6] for Driving corridssor
-      }
-
-
     logger = get_root_logger(cfg.log_level)
     dataset = build_dataset(cfg.data.test)
-    pure_detection = load_pred(detection_path)
-    for seq_file in tqdm(os.listdir(root_dir)):
-        frame_to_dets = load_tracking_file(os.path.join(root_dir, seq_file))
-        viz_dir = seq_file.split('_')
-        seq = viz_dir[0]
-        viz_dir = f'{viz_dir[0]}_{viz_dir[1]}'
-        os.makedirs(os.path.join(viz_root, viz_dir), exist_ok=True)
-        viz_dir = os.path.join(viz_root, viz_dir)
-        id_color, used_colors = {}, []
-        logger.info(f"Start visualization {seq_file.split('.')[0]}")
-        for frame, tracklet_frame in frame_to_dets.items():
-            frame_id = "{:05d}_".format(int(frame)) + "{:05d}".format(int(frame) - seq_to_offset[seq])
-            metadata = pure_detection[seq][frame_id]['metadata']
-            id_color, used_colors = func_show_radar_cube_bev_tracking(dataset, frame_id, metadata, tracklet_frame, viz_dir, id_color, used_colors)
-        
+
+    # arrange gt keyed by sequence
+    new_gt_file = dataset.label_file.replace('.json', '_viz.json')
+    if os.path.exists(new_gt_file):
+        print('Using cached gt viz file')
+        with open(new_gt_file, 'r') as f:
+            gt = json.load(f)
+    else:
+        print('Processing gt file for viz...')
+        gt = defaultdict(dict)
+        for sample in dataset.samples:
+            seq = sample['seq']
+            frame = sample['frame']
+            rdr_frame = sample['rdr_frame']
+            new_objs = []
+            for obj in sample['objs']:
+                new_objs.append([obj['obj_type'], obj['obj_id'], [*obj['xyz'], obj['euler'][2], *obj['lwh']]])
+            gt[seq].update({f'{frame}_{rdr_frame}': new_objs})
+        with open(new_gt_file, 'w') as f:
+            json.dump(gt, f, indent=2)
+
+    target_seq = '5'
+    viz_dir = 'tmp_Radar'
+    tracking_id_to_color, used_colors = {}, []
+    for frame, gt_objs in tqdm(gt[target_seq].items()):
+        frame_id, rdr_frame_id = frame.split('_')
+        tracking_id_to_color, used_colors = viz_radar_cube_bev_tracking(dataset, target_seq, frame_id, rdr_frame_id, gt_objs, viz_dir,  tracking_id_to_color, used_colors)
+    with open('color_table.json', 'w') as f:
+        json.dump(tracking_id_to_color, f, indent=2)
+
 
 
 if __name__ == '__main__':
     # scenario_frame_dict = [(k, v) for k, v in scenario_frame_dict.items()]
     # scenario_frame_dict = [('12', '00310_00274'), ('12', '00300_00264'), ('12', '00316_00280'), ('12', '00817_00781')]
     # scenario_frame_dict = [[(k, v) for k, v in scenario_frame_dict.items()][0]]
-    main()
-    # viz_tracking()
+    # main()
+    viz_tracking()

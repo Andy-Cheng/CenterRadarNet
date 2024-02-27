@@ -27,7 +27,7 @@ DATASET = dict(
     LIDAR_PC_DIR='/mnt/nas_kradar/kradar_dataset/dir_all',
     RDR_CALIB='/mnt/ssd1/kradar_dataset/resources/calib/calib_radar_lidar.json',
     CAM_CALIB='/mnt/ssd1/kradar_dataset/resources/calib/calib_frontcam_lidar.json',
-    LABEL_FILE='/mnt/ssd1/kradar_dataset/labels/refined_v3.json'
+    LABEL_FILE='/mnt/ssd1/kradar_dataset/labels/refined_v3.json',
   ),
   TYPE_COORD= 1, # 1: Radar, 2: Lidar, 3: Camera
   LABEL= dict(

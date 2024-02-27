@@ -95,6 +95,7 @@ def save_pred(type_coord, class_names, pred, root, checkpoint_name, dataset_spli
         pickle.dump(pred_new, f)
     with open(os.path.join(save_pred_dir, f"{dataset_split}_prediction_viz_format.json"), "w") as f:
         json.dump(pred_viz_format, f, indent=2)
+    return pred_new
 
 
 
@@ -129,6 +130,8 @@ def parse_args():
     parser.add_argument("--speed_test", action="store_true")
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--testset", action="store_true")
+    parser.add_argument("--pred_file", default="none")
+
 
     args = parser.parse_args()
     if "LOCAL_RANK" not in os.environ:
@@ -224,82 +227,90 @@ def main():
 
     time_start = 0 
     time_end = 0 
-
-    for i, data_batch in enumerate(data_loader):
-        if i == start:
-            torch.cuda.synchronize()
-            time_start = time.time()
-
-        if i == end:
-            torch.cuda.synchronize()
-            time_end = time.time()
-
-        with torch.no_grad():
-            outputs = batch_processor(
-                model, data_batch, train_mode=False, local_rank=args.local_rank,
-            )
-        for output in outputs:
-            if 'token' in output['metadata']:
-                token = output["metadata"]["token"]
-                for k, v in output.items():
-                    if k not in [
-                        "metadata",
-                    ]:
-                        output[k] = v.to(cpu_device)
-                detections.update(
-                    {token: output,}
-                )
-            elif 'path' in output['metadata']:
-                label_path_parts = Path(output['metadata']['path']['path_label']).parts
-                seq_name = label_path_parts[-3]
-                sample_idx = label_path_parts[-1].split('.')[0]
-                detections.update(
-                    {f'{seq_name}/{sample_idx}': output,}
-                )
-            else:
-                seq_name = output['metadata']['seq']
-                frame_name = output['metadata']['frame']
-                rdr_frame_name = output['metadata']['rdr_frame']
-                if 'app_emb' in output:
-                    app_emb = output.pop('app_emb')
-                    # save_path = os.path.join(cfg.test_cfg.app_emb_save_path, seq_name)
-                    # os.makedirs(save_path, exist_ok=True)
-                    # np.save(os.path.join(save_path, f'{frame_name}.npy'), app_emb)
-                detections.update(
-                    {f'{seq_name}/{frame_name}/{rdr_frame_name}': output,}
-                )
-                
-            if args.local_rank == 0:
-                prog_bar.update()
-            
-
-    synchronize()
-
-    all_predictions = all_gather(detections)
-
-    try:
-        print("\n Total time per frame: ", (time_end -  time_start) / (end - start)) # TODO: fix bug
-    except:
-        pass
-
-    if args.local_rank != 0:
-        return
-
-    predictions = {}
-    for p in all_predictions:
-        predictions.update(p)
-
-    if not os.path.exists(args.work_dir):
-        os.makedirs(args.work_dir)
-
     checkpoint_file_name = args.checkpoint.split('/')[-1].split('.')[0]
-    save_pred(cfg.DATASET.TYPE_COORD, cfg.class_names, predictions, args.work_dir, checkpoint_file_name, 'test' if args.testset else 'train')
 
-    result_dict, _ = dataset.evaluation(copy.deepcopy(predictions), output_dir=args.work_dir, testset=args.testset)
+    if args.pred_file != 'none':
+        with open(args.pred_file, 'rb') as f:
+            pred_np_array = pickle.load(f)
+
+    else:
+        for i, data_batch in enumerate(data_loader):
+            if i == start:
+                torch.cuda.synchronize()
+                time_start = time.time()
+
+            if i == end:
+                torch.cuda.synchronize()
+                time_end = time.time()
+
+            with torch.no_grad():
+                outputs = batch_processor(
+                    model, data_batch, train_mode=False, local_rank=args.local_rank,
+                )
+            for output in outputs:
+                if 'token' in output['metadata']:
+                    token = output["metadata"]["token"]
+                    for k, v in output.items():
+                        if k not in [
+                            "metadata",
+                        ]:
+                            output[k] = v.to(cpu_device)
+                    detections.update(
+                        {token: output,}
+                    )
+                elif 'path' in output['metadata']:
+                    label_path_parts = Path(output['metadata']['path']['path_label']).parts
+                    seq_name = label_path_parts[-3]
+                    sample_idx = label_path_parts[-1].split('.')[0]
+                    detections.update(
+                        {f'{seq_name}/{sample_idx}': output,}
+                    )
+                else:
+                    seq_name = output['metadata']['seq']
+                    frame_name = output['metadata']['frame']
+                    rdr_frame_name = output['metadata']['rdr_frame']
+                    # if 'app_emb' in output:
+                    #     app_emb = output.pop('app_emb')
+                    #     save_path = os.path.join(cfg.test_cfg.app_emb_save_path, seq_name)
+                    #     os.makedirs(save_path, exist_ok=True)
+                    #     np.save(os.path.join(save_path, f'{frame_name}.npy'), app_emb)
+                    detections.update(
+                        {f'{seq_name}/{frame_name}/{rdr_frame_name}': output,}
+                    )
+                    
+                if args.local_rank == 0:
+                    prog_bar.update()
+                
+
+        synchronize()
+
+        all_predictions = all_gather(detections)
+
+        try:
+            print("\n Total time per frame: ", (time_end -  time_start) / (end - start)) # TODO: fix bug
+        except:
+            pass
+
+        if args.local_rank != 0:
+            return
+
+        predictions = {}
+        for p in all_predictions:
+            predictions.update(p)
+
+        if not os.path.exists(args.work_dir):
+            os.makedirs(args.work_dir)
+
+        pred_np_array = save_pred(cfg.DATASET.TYPE_COORD, cfg.class_names, predictions, args.work_dir, checkpoint_file_name, 'test' if args.testset else 'train')
+
+    result_dict, _ = dataset.evaluation(pred_np_array, output_dir=args.work_dir, testset=args.testset)
 
     if result_dict is not None:
-        for k, v in result_dict["results"].items():
+        for k, v in result_dict.items():
             print(f"Evaluation {k}: {v}")
+    data_split = 'test' if args.testset else 'train'
+    with open(os.path.join(args.work_dir, checkpoint_file_name, f"eval_result_{data_split}.json"), "w") as f:
+        json.dump(result_dict, f, indent=2)
 
     if args.txt_result:
         assert False, "No longer support kitti"

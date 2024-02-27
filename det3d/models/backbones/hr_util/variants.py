@@ -680,7 +680,6 @@ class HRNet(nn.Module):
         return nn.Sequential(*modules), num_inchannels
 
     def forward(self, x):
-        x = x.mean(axis=2)
         x = self.layer1(x)
         x_list = []
         for i in range(self.stage2_cfg["NUM_BRANCHES"]):

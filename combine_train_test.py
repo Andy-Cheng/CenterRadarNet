@@ -36,6 +36,6 @@ if __name__ == '__main__':
         with open(args.test_file, 'r') as f:
             test_gt = json.load(f)
         combine_gt.update(test_gt)
-        save_path = os.path.join(os.path.dirname(args.train_file), 'refined_v3numpoints_all_Radar_roi1_Sedan_BusorTruck.json')
+        save_path = os.path.join(os.path.dirname(args.train_file), 'refined_v3__all_allseq_Radar_roi1_Sedan_BusorTruck.json')
         with open(save_path, 'w') as f:
             json.dump(combine_gt, f, indent=2)

@@ -1,4 +1,4 @@
-# Center-based 3D Object Detection and Tracking
+# CenterRadarNet: Joint 3D Object Detection and Tracking Framework using 4D FMCW Radar
 
 3D Object Detection and Tracking using center points in the bird-eye view.
 
@@ -133,3 +133,7 @@ This project is not possible without multiple great opensourced codebases. We li
 * [mmcv](https://github.com/open-mmlab/mmcv)
 * [mmdetection](https://github.com/open-mmlab/mmdetection)
 * [OpenPCDet](https://github.com/open-mmlab/OpenPCDet)
+
+
+# Dev Notes
+- remove old test_kitti folder for reevaluation on the KRadar dataset

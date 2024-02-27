@@ -402,6 +402,8 @@ class Trainer(object):
         self._max_iters = self._max_epochs * self.length
         self.call_hook("before_train_epoch")
         base_step = epoch * self.length
+        if not self.model.jde_loss is None and epoch in self.model.jde_weight_steps:
+            self.model.jde_weight = self.model.jde_weight * self.model.jde_weight_rate
         
         # debug
         # data = data_loader.dataset[0]

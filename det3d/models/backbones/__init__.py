@@ -7,3 +7,4 @@ else:
     print("No spconv, sparse convolution disabled!")
 
 from .hrnet3d import HRNet3D
+from .rodnet import RODNet

@@ -26,7 +26,15 @@ class RadarNetSingleStage(SingleStageDetector):
         )
         if jde_cfg.pop('enable', False):
             self.jde_loss = JDELoss(**jde_cfg)
-            self.jde_weight = jde_cfg.weight
+            if 'weight_cfg' in jde_cfg:
+                self.jde_weight = jde_cfg.weight_cfg.initial_weight
+                self.jde_weight_steps = jde_cfg.weight_cfg.steps
+                self.jde_weight_rate = jde_cfg.weight_cfg.rate
+            else:
+                self.jde_weight = jde_cfg.weight
+                self.jde_weight_steps = []
+                self.jde_weight_rate = 1.0
+
             emb_head_cfg = jde_cfg.emb_head_cfg
             self.num_classes = [len(t["class_names"]) for t in emb_head_cfg.tasks]
             self.class_names = [t["class_names"] for t in emb_head_cfg.tasks]

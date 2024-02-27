@@ -14,7 +14,7 @@ class HRNet3D(nn.Module):
         if kwargs['final_conv_in'] == kwargs['final_conv_out']:
             self.final_conv = nn.Identity()
         else:
-            if backbone_cfg == 'hrnet':
+            if 'hrnet2d' in backbone_cfg:
                 self.final_conv = nn.Conv2d(kwargs['final_conv_in'], kwargs['final_conv_out'], kernel_size=1)
             else:
                 self.final_conv = nn.Conv3d(kwargs['final_conv_in'], kwargs['final_conv_out'], kernel_size=1)
@@ -28,7 +28,7 @@ class HRNet3D(nn.Module):
 
     def forward(self, x_):
         # 2D HRNet
-        if self.backbone_cfg == 'hrnet':
+        if 'hrnet2d' in self.backbone_cfg:
             x = self.backbone(x_)
             if self.with_feat_transform:
                 x = self.feat_transform(x)

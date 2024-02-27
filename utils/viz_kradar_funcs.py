@@ -20,13 +20,13 @@ label_to_color = {
 }
 
 label_to_text = {
-    0: 'Sedan',
-    1: 'Truck'
+    0: 'Car',
+    1: 'BusorTruck'
 }
 
 gt_label_to_color = {
-    'Sedan': '#ef476f',
-    'Bus or Truck': '#e147ef'
+    'Car': '#ef476f',
+    'BusorTruck': '#e147ef'
 }
 
 def viz_radar_tensor_bev(dataset, save_dir, rdr_tensor_bev, xy_labels):
@@ -56,6 +56,124 @@ def viz_radar_tensor_bev(dataset, save_dir, rdr_tensor_bev, xy_labels):
     plt.close()
 
 
+def func_show_radar_cube_bev_cruw(dataset, meta, bboxes, save_dir, conf_thres, seq, seq_gt, magnifying=1., is_with_log = False):
+    frame_id = meta['frame']
+    img_name = f'{frame_id}.jpg'
+    if os.path.exists(os.path.join(save_dir, img_name)):
+        return
+    # if not frame_id == '000685':
+    #     return
+    rdr_cube = dataset.get_cube(seq, frame_id).mean(axis=0) # rdr_cube in Y-X
+    # log
+    if is_with_log:
+        rdr_cube = np.maximum(rdr_cube, 1.)
+        rdr_cube_bev = 10*np.log10(rdr_cube)
+    else:
+        rdr_cube_bev = rdr_cube
+
+    box3d, scores, pred_labels = bboxes
+
+    normalizing = 'min_max'
+    if normalizing == 'max':
+        rdr_cube_bev = rdr_cube_bev/np.max(rdr_cube_bev)
+    elif normalizing == 'fixed':
+        rdr_cube_bev = rdr_cube_bev/dataset.cfg.DATASET.RDR_CUBE.NORMALIZING.VALUE
+    elif normalizing == 'min_max':
+        ### Care for Zero parts ###
+        min_val = np.min(rdr_cube_bev[rdr_cube_bev!=0.])
+        max_val = np.max(rdr_cube_bev[rdr_cube_bev!=0.])
+        rdr_cube_bev[rdr_cube_bev!=0.]= (rdr_cube_bev[rdr_cube_bev!=0.]-min_val)/(max_val-min_val)
+
+    arr_0, arr_1 = np.meshgrid(dataset.arr_x_cb, dataset.arr_y_cb)
+
+    rdr_cube_bev[np.where(rdr_cube_bev==0.)] = -np.inf # for visualization
+    fig, axes = plt.subplots(1, 2, figsize=(16, 9))
+    # show corresponding image
+    cam_img = cv2.imread(os.path.join('/mnt/disk2/CRUW22_IMG', seq, 'left_rrdnet_seq', f'{frame_id}.png'))[:, :, ::-1]
+    axes[1].imshow(cam_img)
+    axes[1].set_title('Cam Front Left')
+
+    # x_plot_loc = np.linspace(0, rdr_cube_bev.shape[1], 11).astype(int)
+    # y_plot_loc = np.linspace(0, rdr_cube_bev.shape[0], 11).astype(int)
+    # axes[0].set_xticks(x_plot_loc, -( x_plot_loc/rdr_cube_bev.shape[1] * (dataset.arr_x_cb[-1] - dataset.arr_x_cb[0])\
+    #     + dataset.arr_x_cb[0]).round(2))
+    # axes[0].set_yticks(y_plot_loc, (-y_plot_loc/rdr_cube_bev.shape[0] * (dataset.arr_y_cb[-1] - dataset.arr_y_cb[0])\
+    #     + dataset.arr_y_cb[0]).round(2))
+    mesh = axes[0].pcolormesh(arr_0, arr_1, rdr_cube_bev, cmap='jet')
+    fig.colorbar(mesh)
+    axes[0].set_title('Radar Cube Power BEV')
+    axes[0].set_xlabel('X(m)')
+    axes[0].set_ylabel('Y(m)')
+    axes[0].set_aspect(1)
+    # x_plot_loc = np.linspace(0, rdr_cube_bev.shape[1], 11).astype(int)
+    # y_plot_loc = np.linspace(0, rdr_cube_bev.shape[0], 11).astype(int)
+    # axes[0].set_xticks(x_plot_loc, ( x_plot_loc/rdr_cube_bev.shape[1] * (dataset.arr_x_cb[-1] - dataset.arr_x_cb[0])\
+    #     + dataset.arr_x_cb[0]).round(2))
+    # axes[0].set_yticks(y_plot_loc, (y_plot_loc/rdr_cube_bev.shape[0] * (dataset.arr_y_cb[-1] - dataset.arr_y_cb[0])\
+    #     + dataset.arr_y_cb[0]).round(2))
+
+
+
+    
+    for box_id, bbox in enumerate(box3d):
+        if scores[box_id] < conf_thres:
+            continue
+        pred_label = pred_labels[box_id]
+        x, y, z, xl, yl, zl, theta = bbox        
+        xl, yl, zl = magnifying * xl, magnifying * yl, magnifying * zl
+        obj3d = Object3D(x, y, z, xl, yl, zl, theta)
+        top_corners = obj3d.corners[[0, 4, 6, 2],:] # from the front left corner, counter-clocwise
+        circle = Circle((x, y), radius=0, linewidth=4, edgecolor=label_to_color[pred_label], facecolor=label_to_color[pred_label])
+        axes[0].add_patch(circle)
+        draw_sequence = [1, 2, 3, 0]
+        for begin_draw_idx, end_draw_idx in enumerate(draw_sequence):
+            axes[0].plot((top_corners[begin_draw_idx][0], top_corners[end_draw_idx][0]), (top_corners[begin_draw_idx][1], top_corners[end_draw_idx][1])\
+                , color=label_to_color[pred_label], linewidth=2.5)
+        # Add car's front face            
+        front_face = (top_corners[0] + top_corners[-1]) / 2
+        axes[0].plot((x, front_face[0]), (y, front_face[1]), \
+            color=label_to_color[pred_label], linewidth=2.5)
+        box_conf_score = str(scores[box_id].round(2))
+        # box_label = pred_labels[box_id] # TODO: add this to viz for multiclass prediction
+        left_face = (top_corners[0] + top_corners[1]) / 2
+        center_to_leftface = 0.5 * (left_face - bbox[:3]) / np.sqrt(np.square(left_face - bbox[:3]).sum()) # half normalized vector
+        # axes[0].text(left_face[0]+center_to_leftface[0], left_face[1]+center_to_leftface[1], f'Sedan, {box_conf_score}', \
+        #     rotation=theta/np.pi*180, fontsize=8, color='#FFFFFF', horizontalalignment='center')
+        axes[0].text(left_face[0]+center_to_leftface[0], left_face[1]+center_to_leftface[1], f'{label_to_text[pred_label]}, {box_conf_score}', \
+            rotation=theta/np.pi*180, fontsize=10, color='#FFFFFF', horizontalalignment='center')
+
+
+    gt_objs = seq_gt[frame_id]
+    for gt_obj in gt_objs: # (cls_name, idx_cls, [x,y,z,theta,l,w,h], idx_obj)
+        cls_name, _, [x, y, z, theta, xl, yl, zl] = gt_obj
+        xl, yl, zl = magnifying * xl, magnifying * yl, magnifying * zl# TODO: set magnifying for better viz.
+        # if cls_name not in ['Car', 'Pedestrian']  or x > 29 or y > 10 or y < -10 or z > 7.6 or z < -2:
+        #     continue
+        obj3d = Object3D(x, y, z, xl, yl, zl, theta)
+        top_corners = obj3d.corners[[0, 4, 6, 2],:] # from the front left corner, counter-clocwise
+        circle = Circle((x, y), radius=0, linewidth=4, edgecolor=gt_label_to_color[cls_name], facecolor=gt_label_to_color[cls_name])
+        axes[0].add_patch(circle)
+        draw_sequence = [1, 2, 3, 0]
+        for begin_draw_idx, end_draw_idx in enumerate(draw_sequence):
+            axes[0].plot((top_corners[begin_draw_idx][0], top_corners[end_draw_idx][0]), (top_corners[begin_draw_idx][1], top_corners[end_draw_idx][1])\
+                , color=gt_label_to_color[cls_name], linewidth=2.)
+        # Add car's front face            
+        front_face = (top_corners[0] + top_corners[-1]) / 2
+        axes[0].plot((x, front_face[0]), (y, front_face[1]), \
+            color=gt_label_to_color[cls_name], linewidth=2.)
+        left_face = (top_corners[0] + top_corners[1]) / 2
+        center_to_leftface = 0.5 * (left_face - np.array([x, y, z])) / np.sqrt(np.square(left_face - np.array([x, y, z])).sum()) # half normalized vector
+    # TODO: show the bbox projection on image
+    # plt.show()
+    # img_name = os.path.split(meta['path']['path_label'])[1].split('.')[0] + '.jpg'
+    # plt.setp(axes[0].get_xticklabels()) #, visible=False
+    # plt.setp(axes[0].get_yticklabels()) #, visible=False
+    # plt.axis('off')
+    fig.savefig(os.path.join(save_dir, img_name))
+    # fig.savefig(os.path.join('/home/andy/Desktop/neurlips_viz', img_name))
+    plt.close()
+
+
 def func_show_radar_cube_bev(dataset, meta, bboxes, save_dir, conf_thres, seq, magnifying=1., is_with_log = False):
     if meta['path']['rdr_cube'][-3:] == 'mat':
         dir_name = meta['path']['rdr_cube'].split('/')[-2]
@@ -63,15 +181,11 @@ def func_show_radar_cube_bev(dataset, meta, bboxes, save_dir, conf_thres, seq, m
         dir_name = f'{dir_name}_npy_f32'
         file_name = file_name[:-3] + 'npy'
         meta['path']['rdr_cube'] = os.path.join('/', *meta['path']['rdr_cube'].split('/')[:-2], dir_name,  file_name)
-    # rdr_cube, rdr_cube_mask, rdr_cube_cnt = dataset.get_cube(meta['path']['rdr_cube'], mode=0)
-    # if is_with_doppler:
-    #     rdr_cube_doppler = dataset.get_cube_doppler(meta['path']['rdr_cube_doppler'])
     
     file_name = meta['path']['rdr_cube'].split('/')[-1]
     rdr_cube_path = meta['path']['rdr_cube'].split('/')[:-2]
-    # rdr_cube_path = osp.join('/', *rdr_cube_path, 'radar_zyx_cube_npy_f32', file_name)
-    # rdr_cube = dataset.get_cube(rdr_cube_path, mode=1)
-    # rdr_cube_path = osp.join('/', *rdr_cube_path, 'radar_zyx_cube_npy_roi', file_name)
+
+
     rdr_cube_path = osp.join('/', *rdr_cube_path, 'radar_zyx_cube_npy_viz_roi', file_name)
     rdr_cube = dataset.get_cube_direct(rdr_cube_path)
 

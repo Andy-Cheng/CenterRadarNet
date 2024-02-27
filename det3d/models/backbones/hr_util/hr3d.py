@@ -401,15 +401,17 @@ class HRNetBackbone(object):
 
     def __call__(self):
         from ..hrnet3D_config import MODEL_CONFIGS
+        from ..hrnet2D_config import MODEL_CONFIGS as MODEL_CONFIGS_2D
         if self.backbone_cfg == 'noexchange':
             arch_net = NoExchange(
                 MODEL_CONFIGS[self.backbone_cfg], full_res_stem=True
             )
 
             return arch_net
-        elif self.backbone_cfg == 'hrnet2d':
+        elif 'hrnet2d' in self.backbone_cfg:
+            backbone_cfg = self.backbone_cfg.split('_')[1]
             arch_net = HRNet(
-                MODEL_CONFIGS[self.backbone_cfg], full_res_stem=True
+                MODEL_CONFIGS_2D[backbone_cfg], full_res_stem=True
             )
 
             return arch_net

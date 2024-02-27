@@ -14,7 +14,7 @@ target_assigner = dict(
     tasks=tasks,
 )
 
-BATCH_SIZE=1
+BATCH_SIZE=8
 
 JDE=dict(
   enable=False,
@@ -51,19 +51,19 @@ JDE=dict(
 
 DATASET = dict(
   DIR=dict(
-    DATA_ROOT='/mnt/ssd1/kradar_dataset',
+    DATA_ROOT='/mnt/nas_kradar/kradar_dataset',
     DEAR_DIR='/mnt/ssd1/kradar_dataset/radar_tensor',
     RDR_CUBE_DIR='/mnt/ssd1/kradar_dataset/radar_tensor_zyx',
     LIDAR_PC_DIR='/mnt/nas_kradar/kradar_dataset/dir_all',
     RDR_CALIB='/mnt/ssd1/kradar_dataset/resources/calib/calib_radar_lidar.json',
     CAM_CALIB='/mnt/ssd1/kradar_dataset/resources/calib/calib_frontcam_lidar.json',
-    LABEL_FILE='/mnt/ssd1/kradar_dataset/labels/refined_v3.json',
+    LABEL_FILE='/mnt/ssd1/kradar_dataset/labels/resampled_allv3numpoints.json',
     START_END_FILE='/mnt/ssd1/kradar_dataset/labels/seq_start_end.json'
   ),
   TYPE_COORD= 1, # 1: Radar, 2: Lidar, 3: Camera
   LABEL= dict(
     IS_CONSIDER_ROI=True,
-    ROI_TYPE='roi2',
+    ROI_TYPE='roi1',
     ROI_DEFAULT=[0,120,-100,100,-50,50], # x_min_max, y_min_max, z_min_max / Dim: [m]
     IS_CHECK_VALID_WITH_AZIMUTH=True,
     MAX_AZIMUTH_DEGREE=[-50, 50],
@@ -267,7 +267,7 @@ log_config = dict(
 )
 # yapf:enable
 # runtime settings
-total_epochs = 30
+total_epochs = 20
 device_ids = range(1)
 dist_params = dict(backend="nccl", init_method="env://")
 log_level = "INFO"
