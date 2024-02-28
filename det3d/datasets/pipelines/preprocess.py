@@ -56,6 +56,8 @@ class Preprocess(object):
                 points = res["lidar"]["points"]
         elif res["type"] in ["NuScenesDataset"]:
             points = res["lidar"]["combined"]
+        
+        
         else:
             raise NotImplementedError
 

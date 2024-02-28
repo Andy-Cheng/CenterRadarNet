@@ -113,6 +113,7 @@ class LoadPointCloudFromFile(object):
         self.type = dataset
         self.random_select = kwargs.get("random_select", False)
         self.npoints = kwargs.get("npoints", 16834)
+        self.lidar_type = kwargs.get("lidar_type", None)
 
     def __call__(self, res, info):
 
@@ -152,7 +153,7 @@ class LoadPointCloudFromFile(object):
             nsweeps = res["lidar"]["nsweeps"]
             obj = get_obj(path)
             points = read_single_waymo(obj)
-            res["lidar"]["points"] = points
+            res["lidar"]["points"] = res['ldr_pc_64']
 
             if nsweeps > 1: 
                 sweep_points_list = [points]
@@ -176,6 +177,12 @@ class LoadPointCloudFromFile(object):
                 res["lidar"]["points"] = points
                 res["lidar"]["times"] = times
                 res["lidar"]["combined"] = np.hstack([points, times])
+
+        elif self.type == "KRadarDataset":
+            # res["lidar"]["points"] = res[res[self.lidar_type]]
+            pass
+            # TODO: check if we need to normalize the intensity
+
         else:
             raise NotImplementedError
 

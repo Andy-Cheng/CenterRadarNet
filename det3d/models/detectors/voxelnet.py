@@ -3,6 +3,10 @@ from .single_stage import SingleStageDetector
 from det3d.torchie.trainer import load_checkpoint
 import torch 
 from copy import deepcopy 
+from det3d.models.losses.jde_loss import JDELoss
+from det3d.models.bbox_heads.center_head import SepHead
+from torch import nn
+
 
 @DETECTORS.register_module
 class VoxelNet(SingleStageDetector):
@@ -12,6 +16,7 @@ class VoxelNet(SingleStageDetector):
         backbone,
         neck,
         bbox_head,
+        jde_cfg=None,
         train_cfg=None,
         test_cfg=None,
         pretrained=None,
@@ -19,6 +24,25 @@ class VoxelNet(SingleStageDetector):
         super(VoxelNet, self).__init__(
             reader, backbone, neck, bbox_head, train_cfg, test_cfg, pretrained
         )
+        if jde_cfg and jde_cfg.pop('enable', False):
+            self.jde_loss = JDELoss(**jde_cfg)
+            if 'weight_cfg' in jde_cfg:
+                self.jde_weight = jde_cfg.weight_cfg.initial_weight
+                self.jde_weight_steps = jde_cfg.weight_cfg.steps
+                self.jde_weight_rate = jde_cfg.weight_cfg.rate
+            else:
+                self.jde_weight = jde_cfg.weight
+                self.jde_weight_steps = []
+                self.jde_weight_rate = 1.0
+
+            emb_head_cfg = jde_cfg.emb_head_cfg
+            self.num_classes = [len(t["class_names"]) for t in emb_head_cfg.tasks]
+            self.class_names = [t["class_names"] for t in emb_head_cfg.tasks]
+            self.tasks = nn.ModuleList()
+            for _ in self.num_classes:
+                self.tasks.append(SepHead(emb_head_cfg.share_conv_channel, emb_head_cfg.head, bn=True, final_kernel=3))
+        else:
+            self.jde_loss = None
         
     def extract_feat(self, data):
         if 'voxels' not in data:

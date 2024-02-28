@@ -117,6 +117,8 @@ class KRadarDataset(Dataset):
             if self.cfg.DATASET.TYPE_COORD == 1:
                 # assume only translational offset between LiDAR and radar
                 tr_rl_translation = np.array(self.calib['tr_rl']).reshape((4, 4))[:3, 3]
+            elif self.cfg.DATASET.TYPE_COORD == 2:
+                tr_rl_translation = np.zeros(3)
             for sample in samples:
                 seq = sample['seq']
                 rdr_frame_id = sample['rdr_frame']
@@ -312,20 +314,17 @@ class KRadarDataset(Dataset):
             pc_lidar = [point.split() for point in lines]
         pc_lidar = np.array(pc_lidar, dtype=np.float32).reshape(-1, 9)[:, :4]
         # only get the front view
-        pc_lidar = pc_lidar[np.where(pc_lidar[:, 0] > 0.01)].reshape(-1, 4)
+        pc_lidar = pc_lidar[np.where(pc_lidar[:, 0] > 0.01)]
         if self.type_coord == 1: # Rdr coordinate
-            tr_rl_translation = np.array(self.calib['tr_rl']).reshape((4, 4))[:3, :]
+            tr_rl_translation = np.array(self.calib['tr_rl']).reshape((4, 4))[:, 3]
             tr_rl_translation[3] = 0.
-            pc_lidar = np.array(list(map(lambda x: \
-                [x[0]+calib_info[0], x[1]+calib_info[1], x[2]+calib_info[2], x[3]],\
-                pc_lidar.tolist())))
             pc_lidar = pc_lidar + tr_rl_translation[None, :]
             # only get PC visible to radar
-            x_min, x_max, y_min, y_max, z_min, z_max = self.cfg.DATASET.LABEL.ROI_DEFAULT
+            z_min, z_max, y_min, y_max, x_min, x_max = [value for sublist in self.cfg.DATASET.ROI[self.cfg.DATASET.LABEL['ROI_TYPE']].values() for value in sublist]
             pc_roi_check = np.all([pc_lidar[:, 0] > x_min, pc_lidar[:, 0] < x_max,\
                                    pc_lidar[:, 1] > y_min, pc_lidar[:, 1] < y_max,\
                                    pc_lidar[:, 2] > z_min, pc_lidar[:, 2] < z_max], axis=0)
-            pc_lidar = pc_lidar[pc_roi_check].reshape(-1, 4)
+            pc_lidar = pc_lidar[pc_roi_check]
         return pc_lidar
     
     def get_description(self, seq):

@@ -3,6 +3,8 @@ import copy
 import json
 import os
 import sys
+sys.path.append(os.getcwd())
+
 
 try:
     import apex
@@ -155,7 +157,7 @@ def main():
     # update configs according to CLI args
     if args.work_dir is not None:
         cfg.work_dir = args.work_dir
-    os.environ["CUDA_VISIBLE_DEVICES"] = cfg.cuda_device
+    # os.environ["CUDA_VISIBLE_DEVICES"] = cfg.cuda_device
     distributed = False
     if "WORLD_SIZE" in os.environ:
         distributed = int(os.environ["WORLD_SIZE"]) > 1
@@ -178,7 +180,7 @@ def main():
     logger.info(f'Model parameter count: {count_parameters(model)}')
     
 
-    cfg['DATASET']['MODE'] = 'test'
+    # cfg['DATASET']['MODE'] = 'test'
     if args.testset:
         print("Use Test Set")
         dataset = build_dataset(cfg.data.test)
