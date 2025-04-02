@@ -237,7 +237,7 @@ test_pipeline = [
 
 data = dict(
     samples_per_gpu=BATCH_SIZE,
-    workers_per_gpu=2,
+    workers_per_gpu=4,
     train=dict(
         type=dataset_type,
         cfg=dict(DATASET=DATASET),
@@ -248,7 +248,7 @@ data = dict(
     test=dict(
         type=dataset_type,
         cfg=dict(DATASET=DATASET),
-        split='test', # todo: change
+        split='train', # todo: change
         class_names=class_names,
         pipeline=test_pipeline,
     ),

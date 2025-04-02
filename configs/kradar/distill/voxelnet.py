@@ -1,20 +1,21 @@
 import itertools
 import logging
-from munch import DefaultMunch
+
 from det3d.utils.config_tool import get_downsample_factor
-from math import ceil
+DOUBLE_FLIP = False 
+
 
 tasks = [
     dict(num_class=2, class_names=["Sedan", "BusorTruck"]),
-    # dict(num_class=1, class_names=["Bicycle", "Pedestrian", "Motorcycle"]),
 ]
 class_names = list(itertools.chain(*[t["class_names"] for t in tasks]))
+
 # training and testing settings
 target_assigner = dict(
     tasks=tasks,
 )
 
-BATCH_SIZE=1
+BATCH_SIZE=8
 
 JDE=dict(
   enable=False,
@@ -51,19 +52,19 @@ JDE=dict(
 
 DATASET = dict(
   DIR=dict(
-    DATA_ROOT='/mnt/nas_kradar/kradar_dataset',
+    DATA_ROOT='/mnt/ssd1/kradar_dataset',
     DEAR_DIR='/mnt/ssd1/kradar_dataset/radar_tensor',
     RDR_CUBE_DIR='/mnt/ssd1/kradar_dataset/radar_tensor_zyx',
     LIDAR_PC_DIR='/mnt/nas_kradar/kradar_dataset/dir_all',
     RDR_CALIB='/mnt/ssd1/kradar_dataset/resources/calib/calib_radar_lidar.json',
     CAM_CALIB='/mnt/ssd1/kradar_dataset/resources/calib/calib_frontcam_lidar.json',
-    LABEL_FILE='/mnt/ssd1/kradar_dataset/labels/refined_allv3numpoints.json',
+    LABEL_FILE='/mnt/ssd1/kradar_dataset/labels/refined_v3.json',
     START_END_FILE='/mnt/ssd1/kradar_dataset/labels/seq_start_end.json'
   ),
   TYPE_COORD= 1, # 1: Radar, 2: Lidar, 3: Camera
   LABEL= dict(
     IS_CONSIDER_ROI=True,
-    ROI_TYPE='roi1',
+    ROI_TYPE='roi2',
     ROI_DEFAULT=[0,120,-100,100,-50,50], # x_min_max, y_min_max, z_min_max / Dim: [m]
     IS_CHECK_VALID_WITH_AZIMUTH=True,
     MAX_AZIMUTH_DEGREE=[-50, 50],
@@ -115,46 +116,41 @@ DATASET = dict(
     GET_ITEM= {
       'rdr_sparse_cube'   : False,
       'rdr_tesseract'     : False,
-      'rdr_cube'          : True,
+      'rdr_cube'          : False,
       'rdr_cube_doppler'  : False,
-      'ldr_pc_64'         : False,
+      'ldr_pc_64'         : True,
       'cam_front_img'     : False,
     },
-    LIST_BAD = [], # seq not used in training,
+    LIST_BAD = [51, 52, 57, 58], # seq not used in training,
     LIST_TARGET=[],
     # DEAR_BUFFER_SIZE=6*BATCH_SIZE # dear loading buffer size per worker process
-    DOMAIN={
-      'train': [],
-      'val': [],
-      'test': []
-    }
   )
-
-hr_final_conv_out = 16
-feature_height_before_head = ceil((DATASET['ROI'][DATASET['LABEL']['ROI_TYPE']]['z'][1] - DATASET['ROI'][DATASET['LABEL']['ROI_TYPE']]['z'][0])/DATASET['RDR_CUBE']['GRID_SIZE'])
 
 # model settings
 model = dict(
-    type="RadarNetSingleStage",
+    type="VoxelNet",
     jde_cfg=JDE,
     pretrained=None,
     reader=dict(
-        type='RadarFeatureNet',
+        type="VoxelFeatureExtractorV3",
+        num_input_features=4,
     ),
     backbone=dict(
-        type="HRNet3D",
-        backbone_cfg='hr_tiny_feat16_zyx_l4',
-        final_conv_in = 16,
-        final_conv_out = hr_final_conv_out,
-        final_fuse = 'top',
-        ds_factor=1,
+        type="SpMiddleResNetFHD", num_input_features=4, ds_factor=8
     ),
-
-    # todo: modify neck and head config 
-    neck=None,
+    neck=dict(
+        type="RPN",
+        layer_nums=[5, 5],
+        ds_layer_strides=[1, 2],
+        ds_num_filters=[128, 256],
+        us_layer_strides=[1, 2],
+        us_num_filters=[256, 256],
+        num_input_features=256,
+        logger=logging.getLogger("RPN"),
+    ),
     bbox_head=dict(
         type="CenterHead",
-        in_channels=hr_final_conv_out*feature_height_before_head, # 384
+        in_channels=sum([256, 256]), # 384
         tasks=tasks,
         dataset='kradar',
         weight=0.25,
@@ -165,16 +161,13 @@ model = dict(
     ),
 )
 
-# todo: modify gussian map params
 assigner = dict(
     target_assigner=target_assigner,
-    out_size_factor=1, # TODO: check this
+    out_size_factor=get_downsample_factor(model),
     dense_reg=1,
     gaussian_overlap=0.1,
     max_objs=30,
     min_radius=2,
-    consider_radar_visibility=DATASET['LABEL']['CONSIDER_RADAR_VISIBILITY'],
-    radar_visibility_cfg=dict(bin=[20, 60, 100], mod_coeff=[0.7, 0.8, 0.9, 1.0]) # bin means num of poitns
 )
 
 
@@ -194,62 +187,80 @@ test_cfg = dict(
     ),
     score_threshold=0.1,
     pc_range=[test_cfg_range['x'][0], test_cfg_range['y'][0]],
-    out_size_factor=1.,
-    voxel_size=[0.4, 0.4],
-    input_type='rdr_tensor',
+    out_size_factor=get_downsample_factor(model),
+    voxel_size=[0.05, 0.05],
+    input_type='',
     app_emb_save_path='/mnt/nas_kradar/kradar_dataset/app_emb/triplet_all_pos_all_neg' # inside are seq folders
 )
-
 
 # dataset settings
 dataset_type = "KRadarDataset"
 
-# kradar data config
+train_preprocessor = dict(
+    mode="train",
+    pc_type='ldr_pc_64',
+    shuffle_points=True,
+    global_rot_noise=[-0.78539816, 0.78539816],
+    global_scale_noise=[0.9, 1.1],
+    global_translate_std=0.5,
+    class_names=class_names,
+)
+
+val_preprocessor = dict(
+    mode="val",
+    pc_type='ldr_pc_64',
+    shuffle_points=False,
+)
 
 
+# range=[-54, -54, -5.0, 54, 54, 3.0],
+
+voxel_generator = dict(
+    range=(0, -30, -2.0, 80, 30, 7.2),
+    voxel_size=[0.05, 0.05, 0.2],
+    max_points_in_voxel=10,
+    max_voxel_num=[120000, 160000],
+)
 
 train_pipeline = [
-    # dict(type="LoadRadarData"),  
-    dict(type="AssignLabelRadar", cfg=train_cfg["assigner"], flip_y_prob=0.0),
+    dict(type="PreprocessKradar", cfg=train_preprocessor),
+    dict(type="VoxelizationKradar", cfg=voxel_generator),
+    dict(type="AssignLabelLidar", cfg=train_cfg["assigner"]),
+    dict(type="Reformat"),
 ]
-
-# val_preprocessor = dict(
-# )
 test_pipeline = [
-    # dict(type="LoadRadarData"),  
-    dict(type="AssignLabelRadar", cfg=train_cfg["assigner"]),
+    dict(type="PreprocessKradar", cfg=val_preprocessor),
+    dict(type="VoxelizationKradar", cfg=voxel_generator),
+    dict(type="AssignLabelLidar", cfg=train_cfg["assigner"]),
+    dict(type="Reformat"),
 ]
-
-jde_data_cfg = dict(enable=JDE['enable'], max_frame_length=JDE['max_frame_length'], \
-                    repeat_frames=JDE['repeat_frames'])
 
 data = dict(
     samples_per_gpu=BATCH_SIZE,
-    workers_per_gpu=2,
+    workers_per_gpu=4,
     train=dict(
         type=dataset_type,
-        cfg=dict(DATASET=DATASET, JDE=jde_data_cfg),
+        cfg=dict(DATASET=DATASET),
         split='train',
         class_names=class_names,
         pipeline=train_pipeline,
     ),
     test=dict(
         type=dataset_type,
-        cfg=dict(DATASET=DATASET, JDE=jde_data_cfg),
+        cfg=dict(DATASET=DATASET),
         split='test', # todo: change
         class_names=class_names,
         pipeline=test_pipeline,
-        mode='test'
     ),
     val=dict(
         type=dataset_type,
-        cfg=dict(DATASET=DATASET, JDE=jde_data_cfg),
+        cfg=dict(DATASET=DATASET),
         split='train',
         class_names=class_names,
         pipeline=test_pipeline,
-        mode='val'
     ),
 )
+
 
 
 optimizer_config = dict(grad_clip=dict(max_norm=35, norm_type=2))
@@ -261,7 +272,7 @@ lr_config = dict(
     type="one_cycle", lr_max=0.001, moms=[0.95, 0.85], div_factor=10.0, pct_start=0.4,
 )
 
-checkpoint_config = dict(interval=2)
+checkpoint_config = dict(interval=1)
 # yapf:disable
 log_config = dict(
     interval=10,
@@ -272,7 +283,7 @@ log_config = dict(
 )
 # yapf:enable
 # runtime settings
-total_epochs = 30
+total_epochs = 20
 device_ids = range(1)
 dist_params = dict(backend="nccl", init_method="env://")
 log_level = "INFO"
@@ -281,10 +292,4 @@ load_from = None
 resume_from = None 
 workflow = [('train', 1)]
 
-cuda_device = '0'
-
-
-if __name__ == '__main__':
-  # test munch libarary to convert dict to object
-  ds_cfg = DefaultMunch.fromDict(DATASET)
-  print(ds_cfg)
+# cuda_device = '0'

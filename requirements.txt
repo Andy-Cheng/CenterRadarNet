@@ -4,7 +4,6 @@ fire
 protobuf                                                                                                  
 opencv-python                                                                                             
 opencv-contrib-python                                                                                     
-pybind11                                                                                                                                                                                                                                                                                                             
 easydict                                                                                                  
 open3d-python                                                                                             
 terminaltables                                                                                            

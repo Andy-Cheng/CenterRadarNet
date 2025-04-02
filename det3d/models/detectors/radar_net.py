@@ -7,6 +7,10 @@ from .. import builder
 from det3d.models.losses.jde_loss import JDELoss
 from det3d.models.bbox_heads.center_head import SepHead
 from torch import nn
+from det3d.utils.vis_util import draw_bev
+
+vis_bev = True
+
 
 @DETECTORS.register_module
 class RadarNetSingleStage(SingleStageDetector):
@@ -56,6 +60,9 @@ class RadarNetSingleStage(SingleStageDetector):
 
     def forward(self, example, return_loss=True, **kwargs):
         x = self.extract_feat(example)
+        if vis_bev:
+            draw_bev(x[0], f"./bev_vis_rad/{example['meta'][0]['seq']}_{example['meta'][0]['frame']}.png")
+        
         preds, shared_conv_feat = self.bbox_head(x)
         app_emb_tasks = None
         if self.jde_loss is not None:

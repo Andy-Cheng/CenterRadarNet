@@ -1,0 +1,1 @@
+python ./tools/train_radar.py configs/kradar/exps/hr3d_allseq.py --work_dir work_dirs/kradar_hr3d

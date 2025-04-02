@@ -5,6 +5,7 @@ from ..registry import BACKBONES
 from .hr_util.hr3d import *
 from .. import builder
 
+
 @BACKBONES.register_module
 class HRNet3D(nn.Module):
 

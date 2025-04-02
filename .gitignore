@@ -15,9 +15,10 @@ venv/
 *.bin
 .vscode/
 work_dirs*
-apex
+apex/
 *.npy
 *.png
 *.jpg
 tmp*
 cruw-devkit
+*_vis
